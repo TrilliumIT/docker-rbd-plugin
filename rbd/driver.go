@@ -2,6 +2,7 @@ package rbddriver
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 
 	log "github.com/Sirupsen/logrus"
@@ -28,41 +29,41 @@ func (rd *RbdDriver) Create(req volume.Request) volume.Response {
 	size := rd.defaultSize
 	img, err := newRbdImage(rd.pool, req.Name)
 	if err != nil {
+		log.Errorf(err.Error())
 		msg := fmt.Sprintf("Failed to generate data structure for image %v/%v.", rd.pool, req.Name)
 		log.Errorf(msg)
-		log.Errorf(err.Error())
 		return volume.Response{Err: msg}
 	}
 
 	err = img.create(size)
 	if err != nil {
+		log.Errorf(err.Error())
 		msg := fmt.Sprintf("Failed to create image %v/%v.", rd.pool, req.Name)
 		log.Errorf(msg)
-		log.Errorf(err.Error())
 		return volume.Response{Err: msg}
 	}
 
 	dev, err := img.mapDevice()
 	if err != nil {
-		msg := fmt.Sprintf("Failed to map the device from image %v", img.fullName())
-		log.Errorf(msg)
 		log.Errorf(err.Error())
+		msg := fmt.Sprintf("Failed to map the device from image %v.", img.fullName())
+		log.Errorf(msg)
 		return volume.Response{Err: msg}
 	}
 
 	err = exec.Command("mkfs."+rd.defaultFS, dev.name).Run()
 	if err != nil {
+		log.Errorf(err.Error())
 		msg := fmt.Sprintf("Failed to create the filesystem on device %v for image %v/%v.", dev.name, rd.pool, req.Name)
 		log.Errorf(msg)
-		log.Errorf(err.Error())
 		return volume.Response{Err: msg}
 	}
 
 	err = img.unmapDevice()
 	if err != nil {
+		log.Errorf(err.Error())
 		msg := fmt.Sprintf("Failed to unmap device %v for image %v/%v after creating filesystem.", dev.name, rd.pool, req.Name)
 		log.Errorf(msg)
-		log.Errorf(err.Error())
 		return volume.Response{Err: msg}
 	}
 
@@ -75,9 +76,9 @@ func (rd *RbdDriver) List(req volume.Request) volume.Response {
 
 	imgs, err := getImages(rd.pool)
 	if err != nil {
+		log.Errorf(err.Error())
 		msg := fmt.Sprintf("Failed to get list of images for pool %v.", rd.pool)
 		log.Errorf(msg)
-		log.Errorf(err.Error())
 		return volume.Response{Volumes: nil, Err: msg}
 	}
 
@@ -93,17 +94,17 @@ func (rd *RbdDriver) Get(req volume.Request) volume.Response {
 
 	img, err := newRbdImage(rd.pool, req.Name)
 	if err != nil {
+		log.Errorf(err.Error())
 		msg := fmt.Sprintf("Failed to generate data structure for image %v.", req.Name)
 		log.Errorf(msg)
-		log.Errorf(err.Error())
 		return volume.Response{Volume: nil, Err: err.Error()}
 	}
 
 	b, err := img.exists()
 	if err != nil {
+		log.Errorf(err.Error())
 		msg := fmt.Sprintf("Failed to determine if image %v exists.", img.fullName())
 		log.Errorf(msg)
-		log.Errorf(err.Error())
 		return volume.Response{Volume: nil, Err: err.Error()}
 	}
 
@@ -119,17 +120,17 @@ func (rd *RbdDriver) Remove(req volume.Request) volume.Response {
 
 	img, err := newRbdImage(rd.pool, req.Name)
 	if err != nil {
+		log.Errorf(err.Error())
 		msg := fmt.Sprintf("Failed to generate data structure for image %v.", req.Name)
 		log.Errorf(msg)
-		log.Errorf(err.Error())
 		return volume.Response{Volume: nil, Err: err.Error()}
 	}
 
 	err = img.remove()
 	if err != nil {
+		log.Errorf(err.Error())
 		msg := fmt.Sprintf("Error occurred while removing the image %v.", img.fullName())
 		log.Errorf(msg)
-		log.Errorf(err.Error())
 		return volume.Response{Err: err.Error()}
 	}
 
@@ -141,17 +142,17 @@ func (rd *RbdDriver) Path(req volume.Request) volume.Response {
 
 	img, err := newRbdImage(rd.pool, req.Name)
 	if err != nil {
+		log.Errorf(err.Error())
 		msg := fmt.Sprintf("Failed to generate data structure for image %v.", req.Name)
 		log.Errorf(msg)
-		log.Errorf(err.Error())
 		return volume.Response{Volume: nil, Err: msg}
 	}
 
 	b, err := img.isMapped()
 	if err != nil {
+		log.Errorf(err.Error())
 		msg := fmt.Sprintf("Error trying to determine if image %v is mapped.", img.fullName())
 		log.Errorf(msg)
-		log.Errorf(err.Error())
 		return volume.Response{Err: msg}
 	}
 
@@ -161,9 +162,9 @@ func (rd *RbdDriver) Path(req volume.Request) volume.Response {
 
 	b, err = img.isMounted()
 	if err != nil {
+		log.Errorf(err.Error())
 		msg := fmt.Sprintf("Error trying to determine if image %v is mounted.", img.fullName())
 		log.Errorf(msg)
-		log.Errorf(err.Error())
 		return volume.Response{Err: msg}
 	}
 
@@ -173,9 +174,9 @@ func (rd *RbdDriver) Path(req volume.Request) volume.Response {
 
 	mp, err := img.getMountPoint()
 	if err != nil {
+		log.Errorf(err.Error())
 		msg := fmt.Sprintf("Error trying to get the mount point of image %v.", img.fullName())
 		log.Errorf(msg)
-		log.Errorf(err.Error())
 		return volume.Response{Err: msg}
 	}
 
@@ -185,14 +186,99 @@ func (rd *RbdDriver) Path(req volume.Request) volume.Response {
 func (rd *RbdDriver) Mount(req volume.MountRequest) volume.Response {
 	log.WithField("Request", req).Debug("Mount")
 
-	//return rd.Path(volume.Request{Name: req.Name})
-	return volume.Response{Err: "Mount is not yet implmented."}
+	img, err := newRbdImage(rd.pool, req.Name)
+	if err != nil {
+		log.Errorf(err.Error())
+		msg := fmt.Sprintf("Error generating data structure for image %v/%v.", rd.pool, req.Name)
+		log.Errorf(msg)
+		return volume.Response{Err: msg}
+	}
+
+	err = img.lock(req.ID)
+	if err != nil {
+		log.Errorf(err.Error())
+		msg := fmt.Sprintf("Error acquiring lock on image %v with id %v.", img.fullName(), req.ID)
+		log.Errorf(msg)
+		return volume.Response{Err: msg}
+	}
+
+	dev, err := img.mapDevice()
+	if err != nil {
+		log.Errorf(err.Error())
+		msg := fmt.Sprintf("Error mapping image %v to device.", img.fullName(), req.ID)
+		log.Errorf(msg)
+		return volume.Response{Err: msg}
+	}
+
+	mp := os.Getenv("DRB_VOLUME_DIR")
+	if mp == "" {
+		mp = "/var/lib/docker-volumes/rbd"
+	}
+
+	mp += "/" + img.fullName()
+	if _, err := os.Stat(mp); err != nil {
+		if !os.IsNotExist(err) {
+			log.Errorf(err.Error())
+			msg := fmt.Sprintf("Error testing for mount point existence at %v.", mp)
+			log.Errorf(msg)
+			return volume.Response{Err: msg}
+		}
+		err2 := os.MkdirAll(mp, 0644)
+		if err2 != nil {
+			log.Errorf(err.Error())
+			msg := fmt.Sprintf("Error creating new mount point at %v.", mp)
+			log.Errorf(msg)
+			return volume.Response{Err: msg}
+		}
+	}
+
+	err = dev.mount(rd.defaultFS, mp)
+	if err != nil {
+		log.Errorf(err.Error())
+		msg := fmt.Sprintf("Error while mounting image %v from device %v to path %v.", img.fullName(), dev.name, mp)
+		log.Errorf(msg)
+		return volume.Response{Err: msg}
+	}
+
+	return volume.Response{Mountpoint: mp, Err: ""}
 }
 
 func (rd *RbdDriver) Unmount(req volume.UnmountRequest) volume.Response {
 	log.WithField("Request", req).Debug("Unmount")
 
-	return volume.Response{Err: "Unmount is not yet implemented."}
+	img, err := newRbdImage(rd.pool, req.Name)
+	if err != nil {
+		log.Errorf(err.Error())
+		msg := fmt.Sprintf("Error generating data structure for image %v/%v.", rd.pool, req.Name)
+		log.Errorf(msg)
+		return volume.Response{Err: msg}
+	}
+
+	dev, err := img.getDevice()
+	if err != nil {
+		log.Errorf(err.Error())
+		msg := fmt.Sprintf("Error getting mount point for image %v.", img.fullName())
+		log.Errorf(msg)
+		return volume.Response{Err: msg}
+	}
+
+	err = dev.unmount()
+	if err != nil {
+		log.Errorf(err.Error())
+		msg := fmt.Sprintf("Error unmounting image %v.", img.fullName())
+		log.Errorf(msg)
+		return volume.Response{Err: msg}
+	}
+
+	err = img.unlock(req.ID)
+	if err != nil {
+		log.Errorf(err.Error())
+		msg := fmt.Sprintf("Error unlocking image %v with id %v.", img.fullName(), req.ID)
+		log.Errorf(msg)
+		return volume.Response{Err: msg}
+	}
+
+	return volume.Response{Err: ""}
 }
 
 func (rd *RbdDriver) Capabilities(req volume.Request) volume.Response {

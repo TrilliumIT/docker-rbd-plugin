@@ -3,6 +3,7 @@ package rbddriver
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -206,39 +207,117 @@ func (ri *rbdImage) exists() (bool, error) {
 	return false, nil
 }
 
+func (ri *rbdImage) lock(id string) error {
+	locks, err := ri.getLocks()
+	if err != nil {
+		log.Errorf(err.Error())
+		return fmt.Errorf("Failed to get locks for image %v.", ri.fullName())
+	}
+
+	if len(locks) > 0 {
+		msg := fmt.Sprintf("Image %v is already locked:", ri.fullName())
+		for k := range locks {
+			msg = msg + "\n\t" + k
+		}
+		return fmt.Errorf(msg)
+	}
+
+	hn, err := os.Hostname()
+	if err != nil {
+		log.Errorf(err.Error())
+		return fmt.Errorf("Error getting hostname while locking image %v.", ri.fullName())
+	}
+
+	lid := hn + ":" + id
+
+	err = exec.Command("rbd", "lock", "add", ri.fullName(), lid).Run()
+	if err != nil {
+		log.Errorf(err.Error())
+		return fmt.Errorf("Failed to acquire lock on image %v with id %v.", ri.fullName(), id)
+	}
+
+	return nil
+}
+
+func (ri *rbdImage) unlock(id string) error {
+	locks, err := ri.getLocks()
+	if err != nil {
+		log.Errorf(err.Error())
+		return fmt.Errorf("Failed to get locks for image %v.", ri.fullName())
+	}
+
+	if len(locks) <= 0 {
+		return fmt.Errorf("No locks found on image %v.", ri.fullName())
+	}
+
+	hn, err := os.Hostname()
+	if err != nil {
+		log.Errorf(err.Error())
+		return fmt.Errorf("Error getting hostname while locking image %v.", ri.fullName())
+	}
+
+	lid := hn + ":" + id
+	l, ok := locks[lid]
+
+	if !ok {
+		return fmt.Errorf("We do not own a lock on image %v with id %v.", ri.fullName(), id)
+	}
+
+	err = exec.Command("rbd", "lock", "rm", ri.fullName(), lid, l["locker"]).Run()
+	if err != nil {
+		log.Errorf(err.Error())
+		return fmt.Errorf("Error removing lock from image %v with id %v.", ri.fullName(), id)
+	}
+
+	return nil
+}
+
+func (ri *rbdImage) getLocks() (map[string]map[string]string, error) {
+	bytes, err := exec.Command("rbd", "lock", "list", "--format", "json", ri.fullName()).Output()
+	if err != nil {
+		log.Errorf(err.Error())
+		return nil, fmt.Errorf("Failed to get locks for image %v.", ri.fullName())
+	}
+
+	var locks map[string]map[string]string
+	err = json.Unmarshal(bytes, &locks)
+	if err != nil {
+		log.Errorf(err.Error())
+		return nil, fmt.Errorf("Failed to unmarshal json: %v", string(bytes))
+	}
+
+	return locks, nil
+}
+
 func getMappings() (map[string]map[string]string, error) {
 	bytes, err := exec.Command("rbd", "showmapped", "--format", "json").Output()
 	if err != nil {
-		log.Errorf("Failed to execute the `rbd showmapped` command.")
-		return nil, err
+		log.Errorf(err.Error())
+		return nil, fmt.Errorf("Failed to execute the `rbd showmapped` command.")
 	}
 
 	var mappings map[string]map[string]string
 	err = json.Unmarshal(bytes, &mappings)
 	if err != nil {
-		log.Errorf("Failed to unmarshal json: %v", string(bytes))
-		return nil, err
+		log.Errorf(err.Error())
+		return nil, fmt.Errorf("Failed to unmarshal json: %v", string(bytes))
 	}
 
 	return mappings, nil
 }
 
 func getImages(pool string) ([]string, error) {
-	out, err := exec.Command("rbd", "list", pool).Output()
+	bytes, err := exec.Command("rbd", "list", "--format", "json", pool).Output()
 	if err != nil {
-		log.Errorf("Failed to list images in pool %v.", pool)
-		return nil, err
+		log.Errorf(err.Error())
+		return nil, fmt.Errorf("Failed to list images in pool %v.", pool)
 	}
 
 	var images []string
-
-	for _, d := range strings.Split(string(out), "\n") {
-		img := strings.TrimSpace(d)
-		if img == "" {
-			continue
-		}
-
-		images = append(images, d)
+	err = json.Unmarshal(bytes, &images)
+	if err != nil {
+		log.Errorf(err.Error())
+		return nil, fmt.Errorf("Failed to unmarshal json: %v", string(bytes))
 	}
 
 	return images, nil
