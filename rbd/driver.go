@@ -144,7 +144,31 @@ func (rd *RbdDriver) Path(req volume.Request) volume.Response {
 		msg := fmt.Sprintf("Failed to generate data structure for image %v.", req.Name)
 		log.Errorf(msg)
 		log.Errorf(err.Error())
-		return volume.Response{Volume: nil, Err: err.Error()}
+		return volume.Response{Volume: nil, Err: msg}
+	}
+
+	b, err := img.isMapped()
+	if err != nil {
+		msg := fmt.Sprintf("Error trying to determine if image %v is mapped.", img.fullName())
+		log.Errorf(msg)
+		log.Errorf(err.Error())
+		return volume.Response{Err: msg}
+	}
+
+	if !b {
+		return volume.Response{Err: fmt.Sprintf("Image %v is not mapped to a device.", img.fullName())}
+	}
+
+	b, err = img.isMounted()
+	if err != nil {
+		msg := fmt.Sprintf("Error trying to determine if image %v is mounted.", img.fullName())
+		log.Errorf(msg)
+		log.Errorf(err.Error())
+		return volume.Response{Err: msg}
+	}
+
+	if !b {
+		return volume.Response{Err: fmt.Sprintf("Image %v is mapped, but not mounted.", img.fullName())}
 	}
 
 	mp, err := img.getMountPoint()
@@ -152,7 +176,7 @@ func (rd *RbdDriver) Path(req volume.Request) volume.Response {
 		msg := fmt.Sprintf("Error trying to get the mount point of image %v.", img.fullName())
 		log.Errorf(msg)
 		log.Errorf(err.Error())
-		return volume.Response{Err: ""}
+		return volume.Response{Err: msg}
 	}
 
 	return volume.Response{Mountpoint: mp, Err: ""}
