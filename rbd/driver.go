@@ -42,9 +42,9 @@ func (rd *RbdDriver) Create(req volume.Request) volume.Response {
 		return volume.Response{Err: msg}
 	}
 
-	dev, err := img.getDevice()
+	dev, err := img.mapDevice()
 	if err != nil {
-		msg := fmt.Sprintf("Failed to get the device from image %v", img.name)
+		msg := fmt.Sprintf("Failed to map the device from image %v", img.fullName())
 		log.Errorf(msg)
 		log.Errorf(err.Error())
 		return volume.Response{Err: msg}

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 
+	log "github.com/Sirupsen/logrus"
 	"github.com/TrilliumIT/docker-rbd-plugin/rbd"
 	"github.com/docker/go-plugins-helpers/volume"
 	"github.com/urfave/cli"
@@ -15,12 +16,6 @@ const (
 )
 
 func main() {
-
-	var flagDataset = cli.StringFlag{
-		Name:  "cluster-name",
-		Value: "ceph",
-		Usage: "Name of the ceph cluster to be used. Default \"ceph\".",
-	}
 
 	var flagPool = cli.StringFlag{
 		Name:  "pool",
@@ -45,7 +40,6 @@ func main() {
 	app.Usage = "Docker RBD Plugin"
 	app.Version = version
 	app.Flags = []cli.Flag{
-		flagDataset,
 		flagPool,
 		flagDefaultSize,
 		flagDefaultFS,
@@ -71,6 +65,8 @@ func Run(ctx *cli.Context) {
 	if err != nil {
 		panic(err)
 	}
+
+	log.Debug("Launching volume handler.")
 	h := volume.NewHandler(d)
 	h.ServeUnix("root", "rbd")
 }

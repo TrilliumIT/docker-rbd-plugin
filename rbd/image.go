@@ -161,7 +161,7 @@ func (ri *rbdImage) remove() error {
 		return fmt.Errorf("Image %v does not exist, cannot remove.", ri.fullName())
 	}
 
-	err = exec.Command("rbd", "remove", ri.fullName(), ri.fullName(), "--yes-i-really-really-mean-it").Run()
+	err = exec.Command("rbd", "remove", ri.fullName()).Run()
 	if err != nil {
 		log.Errorf("Error while trying to remove image %v.", ri.fullName())
 		return err
@@ -198,7 +198,7 @@ func (ri *rbdImage) exists() (bool, error) {
 	}
 
 	for _, img := range images {
-		if ri.fullName() == img {
+		if ri.name == img {
 			return true, nil
 		}
 	}
@@ -233,7 +233,12 @@ func getImages(pool string) ([]string, error) {
 	var images []string
 
 	for _, d := range strings.Split(string(out), "\n") {
-		images = append(images, pool+"/"+d)
+		img := strings.TrimSpace(d)
+		if img == "" {
+			continue
+		}
+
+		images = append(images, d)
 	}
 
 	return images, nil
