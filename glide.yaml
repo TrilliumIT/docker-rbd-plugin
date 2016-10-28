@@ -1,0 +1,9 @@
+package: github.com/TrilliumIT/docker-rbd-plugin
+import:
+- package: github.com/Sirupsen/logrus
+  version: ^0.10.0
+- package: github.com/docker/go-plugins-helpers
+  subpackages:
+  - volume
+- package: github.com/urfave/cli
+  version: ^1.18.1
