@@ -185,6 +185,7 @@ func (rd *RbdDriver) Path(req volume.Request) volume.Response {
 
 func (rd *RbdDriver) Mount(req volume.MountRequest) volume.Response {
 	log.WithField("Request", req).Debug("Mount")
+	var err error
 
 	img, err := newRbdImage(rd.pool, req.Name)
 	if err != nil {
@@ -201,6 +202,11 @@ func (rd *RbdDriver) Mount(req volume.MountRequest) volume.Response {
 		log.Errorf(msg)
 		return volume.Response{Err: msg}
 	}
+	defer func() {
+		if err != nil {
+			_ = img.unlock(req.ID)
+		}
+	}()
 
 	dev, err := img.mapDevice()
 	if err != nil {
@@ -209,6 +215,11 @@ func (rd *RbdDriver) Mount(req volume.MountRequest) volume.Response {
 		log.Errorf(msg)
 		return volume.Response{Err: msg}
 	}
+	defer func() {
+		if err != nil {
+			_ = img.unmapDevice()
+		}
+	}()
 
 	mp := os.Getenv("DRB_VOLUME_DIR")
 	if mp == "" {
@@ -216,20 +227,12 @@ func (rd *RbdDriver) Mount(req volume.MountRequest) volume.Response {
 	}
 
 	mp += "/" + img.fullName()
-	if _, err := os.Stat(mp); err != nil {
-		if !os.IsNotExist(err) {
-			log.Errorf(err.Error())
-			msg := fmt.Sprintf("Error testing for mount point existence at %v.", mp)
-			log.Errorf(msg)
-			return volume.Response{Err: msg}
-		}
-		err2 := os.MkdirAll(mp, 0644)
-		if err2 != nil {
-			log.Errorf(err.Error())
-			msg := fmt.Sprintf("Error creating new mount point at %v.", mp)
-			log.Errorf(msg)
-			return volume.Response{Err: msg}
-		}
+	err = os.MkdirAll(mp, 0755)
+	if err != nil {
+		log.Errorf(err.Error())
+		msg := fmt.Sprintf("Error creating new mount point at %v.", mp)
+		log.Errorf(msg)
+		return volume.Response{Err: msg}
 	}
 
 	err = dev.mount(rd.defaultFS, mp)
@@ -265,7 +268,15 @@ func (rd *RbdDriver) Unmount(req volume.UnmountRequest) volume.Response {
 	err = dev.unmount()
 	if err != nil {
 		log.Errorf(err.Error())
-		msg := fmt.Sprintf("Error unmounting image %v.", img.fullName())
+		msg := fmt.Sprintf("Error unmounting image %v from device %v.", img.fullName(), dev.name)
+		log.Errorf(msg)
+		return volume.Response{Err: msg}
+	}
+
+	err = img.unmapDevice()
+	if err != nil {
+		log.Errorf(err.Error())
+		msg := fmt.Sprintf("Error unmapping image %v from device %v.", img.fullName(), dev.name)
 		log.Errorf(msg)
 		return volume.Response{Err: msg}
 	}
