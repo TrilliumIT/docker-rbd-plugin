@@ -16,9 +16,9 @@ const (
 )
 
 type rbdImage struct {
-	pool string
-	name string
-	lock *rbdLock
+	pool       string
+	name       string
+	activeLock *rbdLock
 }
 
 func LoadRbdImage(pool, name string) (*rbdImage, error) {
@@ -214,7 +214,7 @@ func (img *rbdImage) mapDevice(id string) (string, error) {
 
 		log.Warningf("Image %v is already mapped to %v. Acquiring a lock for it.", img.FullName(), dev)
 
-		err = img.lockImage(id, refresh)
+		err = img.lock(id, refresh)
 		if err != nil {
 			log.Errorf(err.Error())
 			return "", fmt.Errorf("Error acquiring lock on image %v with id %v.", img.FullName(), id)
@@ -223,14 +223,14 @@ func (img *rbdImage) mapDevice(id string) (string, error) {
 		return dev, nil
 	}
 
-	err = img.lockImage(id, refresh)
+	err = img.lock(id, refresh)
 	if err != nil {
 		log.Errorf(err.Error())
 		return "", fmt.Errorf("Error acquiring lock on image %v with id %v.", img.FullName(), id)
 	}
 	defer func() {
 		if err != nil {
-			_ = img.unlockImage()
+			_ = img.unlock()
 		}
 	}()
 
@@ -261,7 +261,7 @@ func (img *rbdImage) unmapDevice(lockid string) error {
 	}
 
 	if !b {
-		err = img.unlockImage()
+		err = img.unlock()
 		if err != nil {
 			log.Errorf(err.Error())
 			return fmt.Errorf("Error unlocking non mapped image %v.", img.FullName())
@@ -277,7 +277,7 @@ func (img *rbdImage) unmapDevice(lockid string) error {
 		return fmt.Errorf("Error while trying to unmap the image %v.", img.FullName())
 	}
 
-	err = img.unlockImage()
+	err = img.unlock()
 	if err != nil {
 		log.Errorf(err.Error())
 		return fmt.Errorf("Error unlocking image %v.", img.FullName())
@@ -307,8 +307,14 @@ func (img *rbdImage) Remove() error {
 		return fmt.Errorf("Cannot remove image %v because it is currently mapped.", img.FullName())
 	}
 
-	if img.lock != nil {
-		return fmt.Errorf("Cannot remove image %v because it is currently locked by %v.", img.FullName(), img.lock.hostname)
+	b, err = IsImageLocked(img.FullName())
+	if err != nil {
+		log.Errorf(err.Error())
+		return fmt.Errorf("Error tyring to determine if image %v is locked.", img.FullName())
+	}
+
+	if b {
+		return fmt.Errorf("Cannot remove image %v because it is currently locked by %v.", img.FullName(), img.activeLock.hostname)
 	}
 
 	err = exec.Command("rbd", "remove", img.FullName()).Run()
@@ -340,26 +346,26 @@ func (img *rbdImage) GetMapping() (map[string]string, error) {
 	return nil, nil
 }
 
-func (img *rbdImage) lockImage(tag string, refresh int) error {
+func (img *rbdImage) lock(tag string, refresh int) error {
 	lock, err := AcquireLock(img.FullName(), tag, refresh)
 	if err != nil {
 		log.Errorf(err.Error())
 		return fmt.Errorf("Error while acquiring a lock for image %v with tag %v and refresh %v.", img.FullName(), tag, refresh)
 	}
 
-	img.lock = lock
+	img.activeLock = lock
 
 	return nil
 }
 
-func (img *rbdImage) unlockImage() error {
-	err := img.lock.release()
+func (img *rbdImage) unlock() error {
+	err := img.activeLock.release()
 	if err != nil {
 		log.Errorf(err.Error())
 		return fmt.Errorf("Error while releasing a lock for image %v.", img.FullName())
 	}
 
-	img.lock = nil
+	img.activeLock = nil
 
 	return nil
 }
