@@ -56,10 +56,14 @@ func AcquireLock(image, tag string, expireSeconds int) (*rbdLock, error) {
 		return nil, fmt.Errorf("Error creating initial lock.")
 	}
 
-	rl.open = make(chan struct{})
-
 	if expireSeconds > 0 {
+		rl.open = make(chan struct{})
 		go rl.refreshLoop(refresh)
+	}
+
+	err = rl.reapLocks()
+	if err != nil {
+		log.WithError(err).WithField("image", rl.image).Warning("Error while reaping locks.")
 	}
 
 	return rl, nil
@@ -81,7 +85,32 @@ func (rl *rbdLock) addLock(expires time.Time) (string, error) {
 	return lid, nil
 }
 
-func (rl *rbdLock) refreshLock() error {
+func (rl *rbdLock) refreshLock(expiresIn time.Duration) error {
+	lid, err := rl.addLock(time.Now().Add(expiresIn))
+	if err != nil {
+		log.WithError(err).WithField("image", rl.image).Error("Error adding lock to image.")
+	}
+
+	locks, err := getImageLocks(rl.image)
+	if err != nil {
+		log.Errorf(err.Error())
+		return fmt.Errorf("Error retrieving locks for image %v.", rl.image)
+	}
+
+	for k, v := range locks {
+		if lid == k {
+			continue
+		}
+
+		lock := strings.Split(k, ",")
+		if rl.hostname != lock[0] {
+			log.WithField("hostname", lock[0]).Warning("Encounted a lock held by a different host while updating our lock. Image should not be locked by multiple hosts.")
+			continue
+		}
+
+		rl.removeLock(k, v["locker"])
+	}
+
 	return nil
 }
 
@@ -131,33 +160,37 @@ func (rl *rbdLock) refreshLoop(refreshInterval time.Duration) {
 			log.Debug("lock channel shut, closing refresh loop")
 			return
 		case <-rl.ticker.C:
-			lid, err := rl.addLock(time.Now().Add(expiresIn))
+			err := rl.refreshLock(expiresIn)
 			if err != nil {
-				log.WithError(err).WithField("image", rl.image).Error("Error adding lock to image.")
-			}
-
-			locks, err := getImageLocks(rl.image)
-			if err != nil {
-				log.Errorf(err.Error())
-				log.Errorf("Error retrieving locks for image %v.", rl.image)
+				log.WithError(err).WithField("image", rl.image).Error("Error refreshing lock.")
 				continue
-			}
-
-			for k, v := range locks {
-				if lid == k {
-					continue
-				}
-
-				lock := strings.Split(k, ",")
-				if rl.hostname != lock[0] {
-					log.WithField("hostname", lock[0]).Warning("Encounted a lock held by a different host while updating our lock. Image should not be locked by multiple hosts.")
-					continue
-				}
-
-				rl.removeLock(k, v["locker"])
 			}
 		}
 	}
+}
+
+func (rl *rbdLock) reapLocks() error {
+	locks, err := getImageLocks(rl.image)
+	if err != nil {
+		log.Errorf(err.Error())
+		return fmt.Errorf("Error while getting locks for image %v.", rl.image)
+	}
+
+	for k, v := range locks {
+		lock := strings.Split(k, ",")
+
+		t, err := time.Parse(time.RFC3339Nano, lock[1])
+		if err != nil {
+			log.WithError(err).WithField("lock id", k).Warning("Error while parsing time from lock id.")
+			continue
+		}
+
+		if time.Now().After(t) {
+			rl.removeLock(k, v["locker"])
+		}
+	}
+
+	return nil
 }
 
 func getImageLocks(image string) (map[string]map[string]string, error) {

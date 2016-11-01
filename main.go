@@ -39,9 +39,7 @@ func main() {
 	}
 	app.Action = Run
 
-	//TODO: Launch a lock watching/reaping routine.
 	//TODO: re-enable any lock refresh routines we need
-	//TODO: remove any open locks we don't need
 
 	err := app.Run(os.Args)
 	if err != nil {
