@@ -418,6 +418,7 @@ func (img *rbdImage) Mount(lockid string) (string, error) {
 
 	fs := strings.TrimSpace(string(out))
 
+	log.Infof("Mounting device %v to %v as %v filesystem.", dev, mp, fs)
 	err = syscall.Mount(dev, mp, fs, 0, "")
 	if err != nil {
 		log.Errorf(err.Error())
