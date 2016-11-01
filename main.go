@@ -29,12 +29,6 @@ func main() {
 		Usage: "Default size when creating an rbd image.",
 	}
 
-	var flagDefaultFS = cli.StringFlag{
-		Name:  "default-fs",
-		Value: "xfs",
-		Usage: "Default filesystem to format for newly created rbd volumes. The corresponding `mkfs.<fs-type>` must exist on the $PATH",
-	}
-
 	app := cli.NewApp()
 	app.Name = "docker-rbd-plugin"
 	app.Usage = "Docker RBD Plugin"
@@ -42,7 +36,6 @@ func main() {
 	app.Flags = []cli.Flag{
 		flagPool,
 		flagDefaultSize,
-		flagDefaultFS,
 	}
 	app.Action = Run
 
@@ -61,7 +54,7 @@ func Run(ctx *cli.Context) {
 		panic(fmt.Sprintf("Failed to access stats for the pool: %v. Does it exist in the ceph cluster?", ctx.String("pool")))
 	}
 
-	d, err := rbddriver.NewRbdDriver(ctx.String("pool"), ctx.String("default-size"), ctx.String("default-fs"))
+	d, err := rbddriver.NewRbdDriver(ctx.String("pool"), ctx.String("default-size"))
 	if err != nil {
 		panic(err)
 	}
