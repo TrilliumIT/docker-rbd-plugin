@@ -49,6 +49,11 @@ func AcquireLock(image, tag string, expireSeconds int) (*rbdLock, error) {
 	}
 
 	rl := &rbdLock{hostname: hn, image: image, tag: tag, ticker: ti, open: make(chan struct{})}
+	err = rl.reapLocks()
+	if err != nil {
+		log.Errorf(err.Error())
+		return rl, fmt.Errorf("Error while reaping old locks before adding our initial lock.")
+	}
 	go rl.refreshLoop(expiresIn)
 
 	return rl, nil
@@ -64,7 +69,7 @@ func (rl *rbdLock) addLock(expires time.Time) (string, error) {
 	err := exec.Command("rbd", "lock", "add", "--shared", rl.tag, rl.image, lid).Run()
 	if err != nil {
 		log.Errorf(err.Error())
-		return "", fmt.Errorf("Failed to acquire lock on image %v.", rl.image)
+		return "", fmt.Errorf("Failed to add lock to image %v.", rl.image)
 	}
 
 	return lid, nil
