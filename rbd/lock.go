@@ -50,7 +50,7 @@ func AcquireLock(image, tag string, expireSeconds int) (*rbdLock, error) {
 
 	rl := &rbdLock{hostname: hn, image: image, tag: tag}
 
-	err = rl.addLock(exp)
+	_, err = rl.addLock(exp)
 	if err != nil {
 		log.Errorf(err.Error())
 		return nil, fmt.Errorf("Error creating initial lock.")
@@ -69,15 +69,16 @@ func AcquireFixedLock(image, tag string) (*rbdLock, error) {
 	return AcquireLock(image, tag, 0)
 }
 
-func (rl *rbdLock) addLock(expires time.Time) error {
+func (rl *rbdLock) addLock(expires time.Time) (string, error) {
 	lid := rl.hostname + "," + expires.Format(time.RFC3339Nano)
 
 	err := exec.Command("rbd", "lock", "add", "--shared", rl.tag, rl.image, lid).Run()
 	if err != nil {
 		log.Errorf(err.Error())
-		return fmt.Errorf("Failed to acquire lock on image %v.", rl.image)
+		return "", fmt.Errorf("Failed to acquire lock on image %v.", rl.image)
 	}
-	return nil
+
+	return lid, nil
 }
 
 func (rl *rbdLock) refreshLock() error {
@@ -119,8 +120,6 @@ func (rl *rbdLock) release() error {
 func (rl *rbdLock) refreshLoop(refreshInterval time.Duration) {
 	rl.ticker = time.NewTicker(refreshInterval)
 	expiresIn := time.Second * time.Duration(refreshInterval.Seconds()/float64(DRP_REFRESH_PERCENT/100.0))
-	//inverse refresh for deleting older, but unexpired locks
-	hserfer := refreshInterval - expiresIn
 
 	for {
 		select {
@@ -128,8 +127,11 @@ func (rl *rbdLock) refreshLoop(refreshInterval time.Duration) {
 			log.Debug("lock channel shut, closing refresh loop")
 			return
 		case <-rl.ticker.C:
-			log.Debug("updating lock")
-			rl.addLock(time.Now().Add(expiresIn))
+			lid, err := rl.addLock(time.Now().Add(expiresIn))
+			if err != nil {
+				log.WithError(err).WithField("image", rl.image).Error("Error adding lock to image.")
+			}
+
 			locks, err := getImageLocks(rl.image)
 			if err != nil {
 				log.Errorf(err.Error())
@@ -138,22 +140,17 @@ func (rl *rbdLock) refreshLoop(refreshInterval time.Duration) {
 			}
 
 			for k, v := range locks {
+				if lid == k {
+					continue
+				}
+
 				lock := strings.Split(k, ",")
 				if rl.hostname != lock[0] {
-					log.Errorf("Encounted a lock held by a different host while updating our lock. Image should not be locked by multiple hosts.")
+					log.WithField("hostname", lock[0]).Warning("Encounted a lock held by a different host while updating our lock. Image should not be locked by multiple hosts.")
 					continue
 				}
 
-				t, err := time.Parse(time.RFC3339Nano, lock[1])
-				if err != nil {
-					log.Errorf(err.Error())
-					log.Errorf("Error while parsing time from lock id %v.", k)
-					continue
-				}
-
-				if time.Now().After(t.Add(hserfer)) {
-					rl.removeLock(k, v["locker"])
-				}
+				rl.removeLock(k, v["locker"])
 			}
 		}
 	}
