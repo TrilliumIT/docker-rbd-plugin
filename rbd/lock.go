@@ -96,7 +96,11 @@ func (rl *rbdLock) removeLock(id, locker string) error {
 }
 
 func (rl *rbdLock) release() error {
-	close(rl.open)
+	select {
+	case _ = <-rl.open:
+	default:
+		close(rl.open)
+	}
 
 	locks, err := getImageLocks(rl.image)
 	if err != nil {
