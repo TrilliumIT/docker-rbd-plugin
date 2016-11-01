@@ -39,8 +39,6 @@ func main() {
 	}
 	app.Action = Run
 
-	//TODO: re-enable any lock refresh routines we need
-
 	err := app.Run(os.Args)
 	if err != nil {
 		panic(err)

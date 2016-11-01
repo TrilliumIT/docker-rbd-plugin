@@ -21,6 +21,40 @@ func NewRbdDriver(pool, ds string) (*RbdDriver, error) {
 	log.SetLevel(log.DebugLevel)
 	log.Debug("Creating new RbdDriver.")
 
+	//startup tasks
+	//get mappings
+	mappings, err := GetMappings()
+	if err != nil {
+		log.Errorf(err.Error())
+		return nil, fmt.Errorf("Error getting initial mappings.")
+	}
+
+	for _, m := range mappings {
+		b, err := IsImageLocked(m["pool"] + "/" + m["name"])
+		if err != nil {
+			log.WithError(err).WithField("mapping", m).Error("Error getting lock status of image.")
+		}
+
+		if b {
+			/*
+				if !lockedbyme {
+					emergency unmap
+					continue
+				}
+				get lock share id, rebuild lock
+				if not fixed lock, reset refresh loop
+				continue
+			*/
+		}
+		/*
+			create lock with default refresh (a fixed lock would still be valid and handled above, in theory anyway)
+
+			if !m.usedbycontainer {
+				cleanly unmap/unmount
+			}
+		*/
+	}
+
 	return &RbdDriver{pool: pool, defaultSize: ds, mounts: make(map[string]*rbdImage), mutex: &sync.Mutex{}}, nil
 }
 
@@ -184,7 +218,7 @@ func (rd *RbdDriver) Mount(req volume.MountRequest) volume.Response {
 
 	rd.mutex.Lock()
 	defer rd.mutex.Unlock()
-	rd.mounts[req.ID] = img
+	rd.mounts[req.Name] = img
 
 	return volume.Response{Mountpoint: mp, Err: ""}
 }
@@ -194,9 +228,9 @@ func (rd *RbdDriver) Unmount(req volume.UnmountRequest) volume.Response {
 
 	rd.mutex.Lock()
 	defer rd.mutex.Unlock()
-	img, ok := rd.mounts[req.ID]
+	img, ok := rd.mounts[req.Name]
 	if !ok {
-		msg := fmt.Sprintf("Could not find image object for %v with id %v.", req.Name, req.ID)
+		msg := fmt.Sprintf("Could not find image object for %v.", req.Name)
 		log.Errorf(msg)
 		return volume.Response{Err: msg}
 	}
