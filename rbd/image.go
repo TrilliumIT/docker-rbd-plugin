@@ -396,13 +396,13 @@ func (img *rbdImage) Mount(lockid string) (string, error) {
 	err = os.MkdirAll(mp, 0755)
 	if err != nil {
 		log.Errorf(err.Error())
-		return "", fmt.Errorf("Error creating new mount point directory at %v.", mp)
+		return mp, fmt.Errorf("Error creating new mount point directory at %v.", mp)
 	}
 
 	dev, err := img.mapDevice(lockid)
 	if err != nil {
 		log.Errorf(err.Error())
-		return "", fmt.Errorf("Error mapping image %v to device.", img.FullName())
+		return mp, fmt.Errorf("Error mapping image %v to device.", img.FullName())
 	}
 	defer func() {
 		if err != nil {
@@ -422,10 +422,10 @@ func (img *rbdImage) Mount(lockid string) (string, error) {
 	err = syscall.Mount(dev, mp, fs, 0, "")
 	if err != nil {
 		log.Errorf(err.Error())
-		return "", fmt.Errorf("Error while trying to mount device %v.", dev)
+		return mp, fmt.Errorf("Error while trying to mount device %v.", dev)
 	}
 
-	return "", nil
+	return mp, nil
 }
 
 func (img *rbdImage) Unmount(lockid string) error {
