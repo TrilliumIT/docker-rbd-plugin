@@ -142,11 +142,14 @@ func (rl *rbdLock) release() error {
 }
 
 func (rl *rbdLock) refreshLoop(expiresIn time.Duration) {
+	err := rl.refreshLock(expiresIn)
+	if err != nil {
+		log.WithError(err).WithField("image", rl.image).Error("Error while creating a initial lock on image.")
+		return
+	}
+
 	if expiresIn.Seconds() == 0 {
-		err := rl.refreshLock(expiresIn)
-		if err != nil {
-			log.WithError(err).WithField("image", rl.image).Error("Error while creating a fixed lock on image.")
-		}
+		log.WithField("lock tag", rl.tag).Info("Bypassing refresh loop for fixed lock.")
 		return
 	}
 
@@ -182,6 +185,11 @@ func (rl *rbdLock) reapLocks() error {
 		}
 
 		if time.Now().After(t) {
+			log.WithFields(log.Fields{
+				"lock id": k,
+				"locker":  v["locker"],
+				"address": v["address"],
+			}).Info("Reaping expired lock.")
 			rl.removeLock(k, v["locker"])
 		}
 	}
