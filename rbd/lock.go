@@ -11,16 +11,31 @@ import (
 	log "github.com/Sirupsen/logrus"
 )
 
+const (
+	DRP_REFRESH_PERCENT = 50
+)
+
 type rbdLock struct {
 	hostname string
 	image    string
 	tag      string
-	timer    *time.Timer
+	ticker   *time.Ticker
 	open     chan struct{}
 }
 
-func AcquireLock(image, tag string, refreshInterval int) (*rbdLock, error) {
-	//TODO: first make sure there are no existing locks!
+func AcquireLock(image, tag string, expiresIn int) (*rbdLock, error) {
+	refresh := int(float64(DRP_REFRESH_PERCENT/100) * float64(expiresIn))
+
+	b, err := IsImageLocked(image)
+	if err != nil {
+		log.Errorf(err.Error())
+		return nil, fmt.Errorf("Error trying to determine if image %v is currently locked.", image)
+	}
+
+	if b {
+		return nil, fmt.Errorf("Image already has a valid lock held.")
+	}
+
 	hn, err := os.Hostname()
 	if err != nil {
 		log.Errorf(err.Error())
@@ -28,8 +43,8 @@ func AcquireLock(image, tag string, refreshInterval int) (*rbdLock, error) {
 	}
 
 	exp := time.Unix(1<<63-62135596801, 999999999)
-	if refreshInterval > 0 {
-		exp = time.Now().Add(time.Duration(refreshInterval) * time.Second)
+	if expiresIn > 0 {
+		exp = time.Now().Add(time.Duration(expiresIn) * time.Second)
 	}
 
 	rl := &rbdLock{hostname: hn, image: image, tag: tag}
@@ -42,9 +57,8 @@ func AcquireLock(image, tag string, refreshInterval int) (*rbdLock, error) {
 
 	rl.open = make(chan struct{})
 
-	if refreshInterval > 0 {
-		rl.timer = time.NewTimer(time.Duration(refreshInterval) * time.Second)
-		go rl.refreshLoop(refreshInterval)
+	if expiresIn > 0 {
+		go rl.refreshLoop(time.Duration(refresh) * time.Second)
 	}
 
 	return rl, nil
@@ -101,17 +115,20 @@ func (rl *rbdLock) release() error {
 	return nil
 }
 
-func (rl *rbdLock) refreshLoop(refreshInterval int) {
+func (rl *rbdLock) refreshLoop(refreshInterval time.Duration) {
+	rl.ticker = time.NewTicker(refreshInterval)
+	expiresIn := time.Second * time.Duration(refreshInterval.Seconds()/float64(DRP_REFRESH_PERCENT/100.0))
+	//inverse refresh for deleting older, but unexpired locks
+	hserfer := refreshInterval - expiresIn
+
 	for {
 		select {
 		case <-rl.open:
 			log.Debug("lock channel shut, closing refresh loop")
 			return
-		case <-rl.timer.C:
+		case <-rl.ticker.C:
 			log.Debug("updating lock")
-
-			rl.timer = time.NewTimer(time.Duration(refreshInterval) * time.Second)
-			rl.addLock(time.Now().Add(time.Duration(refreshInterval) * time.Second))
+			rl.addLock(time.Now().Add(expiresIn))
 			locks, err := getImageLocks(rl.image)
 			if err != nil {
 				log.Errorf(err.Error())
@@ -133,7 +150,7 @@ func (rl *rbdLock) refreshLoop(refreshInterval int) {
 					continue
 				}
 
-				if time.Now().After(t) {
+				if time.Now().After(t.Add(hserfer)) {
 					rl.removeLock(k, v["locker"])
 				}
 			}
@@ -156,4 +173,29 @@ func getImageLocks(image string) (map[string]map[string]string, error) {
 	}
 
 	return locks, nil
+}
+
+func IsImageLocked(image string) (bool, error) {
+	locks, err := getImageLocks(image)
+	if err != nil {
+		log.Errorf(err.Error())
+		return false, fmt.Errorf("Error while getting locks for image %v.", image)
+	}
+
+	for k := range locks {
+		lock := strings.Split(k, ",")
+
+		t, err := time.Parse(time.RFC3339Nano, lock[1])
+		if err != nil {
+			log.Warningf(err.Error())
+			log.Warningf("Error while parsing time from lock id %v.", k)
+			continue
+		}
+
+		if time.Now().Before(t) {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }

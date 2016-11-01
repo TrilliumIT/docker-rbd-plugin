@@ -180,9 +180,26 @@ func (img *rbdImage) FullName() string {
 }
 
 func (img *rbdImage) mapDevice(id string) (string, error) {
-	//TODO: check for locks
+	b, err := IsImageLocked(img.FullName())
+	if err != nil {
+		log.Errorf(err.Error())
+		return "", fmt.Errorf("Error trying to determine if image %v was already locked.", img.FullName())
+	}
 
-	b, err := img.IsMapped()
+	if b {
+		return "", fmt.Errorf("Cannot map a locked image.")
+	}
+
+	refresh := DRP_DEFAULT_LOCK_REFRESH
+	srefresh := os.Getenv("DRP_LOCK_REFRESH")
+	if srefresh != "" {
+		refresh, err = strconv.Atoi(srefresh)
+		if err != nil {
+			log.Warningf("Error while parsing DRP_LOCK_REFRESH with value %v to int, using default.", srefresh)
+		}
+	}
+
+	b, err = img.IsMapped()
 	if err != nil {
 		log.Errorf(err.Error())
 		return "", fmt.Errorf("Failed to detrimine if image %v is already mapped.", img.FullName())
@@ -195,20 +212,15 @@ func (img *rbdImage) mapDevice(id string) (string, error) {
 			return "", fmt.Errorf("Image %v is already mapped and failed to get the device.", img.FullName())
 		}
 
-		//TODO: Acquire a lock in this case?
+		log.Warningf("Image %v is already mapped to %v. Acquiring a lock for it.", img.FullName(), dev)
 
-		log.Warningf("Image %v is already mapped to %v.", img.FullName(), dev)
+		err = img.lockImage(id, refresh)
+		if err != nil {
+			log.Errorf(err.Error())
+			return "", fmt.Errorf("Error acquiring lock on image %v with id %v.", img.FullName(), id)
+		}
 
 		return dev, nil
-	}
-
-	refresh := DRP_DEFAULT_LOCK_REFRESH
-	srefresh := os.Getenv("DRP_LOCK_REFRESH")
-	if srefresh != "" {
-		refresh, err = strconv.Atoi(srefresh)
-		if err != nil {
-			log.Warningf("Error while parsing DRP_LOCK_REFRESH with value %v to int.", srefresh)
-		}
 	}
 
 	err = img.lockImage(id, refresh)
@@ -329,7 +341,6 @@ func (img *rbdImage) GetMapping() (map[string]string, error) {
 }
 
 func (img *rbdImage) lockImage(tag string, refresh int) error {
-	//TODO: use shared lock mechanism for refreshing, expiring, and reaping locks
 	lock, err := AcquireLock(img.FullName(), tag, refresh)
 	if err != nil {
 		log.Errorf(err.Error())
@@ -393,11 +404,13 @@ func (img *rbdImage) Mount(lockid string) (string, error) {
 		}
 	}()
 
-	//TODO: use blkid to detect fs type
-	fs := os.Getenv("DRP_DEFAULT_FS")
-	if fs == "" {
-		fs = "xfs"
+	out, err := exec.Command("blkid", "-s", "TYPE", "-o", "value", dev).Output()
+	if err != nil {
+		log.Errorf(err.Error())
+		return dev, fmt.Errorf("Error running blkid to determine the filesystem type of image %v on dev %v.", img.FullName(), dev)
 	}
+
+	fs := strings.TrimSpace(string(out))
 
 	err = syscall.Mount(dev, mp, fs, 0, "")
 	if err != nil {

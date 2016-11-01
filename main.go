@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
-	"os/exec"
+	"os/user"
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/TrilliumIT/docker-rbd-plugin/rbd"
@@ -39,7 +39,9 @@ func main() {
 	}
 	app.Action = Run
 
-	//TODO: Launch a lock watching routine.
+	//TODO: Launch a lock watching/reaping routine.
+	//TODO: re-enable any lock refresh routines we need
+	//TODO: remove any open locks we don't need
 
 	err := app.Run(os.Args)
 	if err != nil {
@@ -49,14 +51,31 @@ func main() {
 
 // Run runs the driver
 func Run(ctx *cli.Context) {
-	err := exec.Command("ceph", "osd", "pool", "stats", ctx.String("pool")).Run()
+	u, err := user.Current()
 	if err != nil {
-		panic(fmt.Sprintf("Failed to access stats for the pool: %v. Does it exist in the ceph cluster?", ctx.String("pool")))
+		fmt.Printf("Error trying to get the current user.")
+		os.Exit(1)
+	}
+
+	if u.Uid != "0" {
+		fmt.Printf("Docker RBD Plugin requires root priveleges.")
+		os.Exit(1)
+	}
+
+	b, err := rbddriver.PoolExists(ctx.String("pool"))
+	if err != nil {
+		fmt.Printf(err.Error())
+		os.Exit(1)
+	}
+
+	if !b {
+		fmt.Printf("The requested ceph pool %v for docker volumes does not exist in the ceph cluster.", ctx.String("pool"))
 	}
 
 	d, err := rbddriver.NewRbdDriver(ctx.String("pool"), ctx.String("default-size"))
 	if err != nil {
-		panic(err)
+		fmt.Printf(err.Error())
+		os.Exit(1)
 	}
 
 	log.Debug("Launching volume handler.")

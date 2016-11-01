@@ -112,3 +112,13 @@ func ImageExists(pool, name string) (bool, error) {
 
 	return false, nil
 }
+
+func PoolExists(pool string) (bool, error) {
+	err := exec.Command("rbd", "list", pool).Run()
+	if err != nil {
+		log.Errorf(err.Error())
+		return false, fmt.Errorf("Error trying to access pool %v. Does it exist?", pool)
+	}
+
+	return true, nil
+}
