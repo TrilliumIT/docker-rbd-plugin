@@ -21,7 +21,7 @@ func NewRbdDriver(pool, ds string) (*RbdDriver, error) {
 	log.SetLevel(log.DebugLevel)
 	log.Debug("Creating new RbdDriver.")
 
-	return &RbdDriver{pool: pool, defaultSize: ds}, nil
+	return &RbdDriver{pool: pool, defaultSize: ds, mutex: &sync.Mutex{}}, nil
 }
 
 func (rd *RbdDriver) Create(req volume.Request) volume.Response {
