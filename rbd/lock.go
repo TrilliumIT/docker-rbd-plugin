@@ -156,7 +156,7 @@ func (rl *rbdLock) refreshLoop(expiresIn time.Duration) {
 	for {
 		select {
 		case <-rl.open:
-			log.Debug("lock channel shut, closing refresh loop")
+			log.WithField("image", rl.image).Debug("Lock channel shut, closing refresh loop")
 			return
 		case <-rl.ticker.C:
 			err := rl.refreshLock(expiresIn)
