@@ -23,8 +23,9 @@ type rbdLock struct {
 	open     chan struct{}
 }
 
-func AcquireLock(image, tag string, expiresIn int) (*rbdLock, error) {
-	refresh := int(float64(DRP_REFRESH_PERCENT/100) * float64(expiresIn))
+func AcquireLock(image, tag string, expireSeconds int) (*rbdLock, error) {
+	expiresIn := time.Duration(expireSeconds) * time.Second
+	refresh := time.Duration(int(float32(expireSeconds)*(DRP_REFRESH_PERCENT/100.0))) * time.Second
 
 	b, err := IsImageLocked(image)
 	if err != nil {
@@ -43,8 +44,8 @@ func AcquireLock(image, tag string, expiresIn int) (*rbdLock, error) {
 	}
 
 	exp := time.Unix(1<<63-62135596801, 999999999)
-	if expiresIn > 0 {
-		exp = time.Now().Add(time.Duration(expiresIn) * time.Second)
+	if expireSeconds > 0 {
+		exp = time.Now().Add(expiresIn)
 	}
 
 	rl := &rbdLock{hostname: hn, image: image, tag: tag}
@@ -57,8 +58,8 @@ func AcquireLock(image, tag string, expiresIn int) (*rbdLock, error) {
 
 	rl.open = make(chan struct{})
 
-	if expiresIn > 0 {
-		go rl.refreshLoop(time.Duration(refresh) * time.Second)
+	if expireSeconds > 0 {
+		go rl.refreshLoop(refresh)
 	}
 
 	return rl, nil

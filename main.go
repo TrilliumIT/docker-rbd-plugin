@@ -53,12 +53,12 @@ func main() {
 func Run(ctx *cli.Context) {
 	u, err := user.Current()
 	if err != nil {
-		fmt.Printf("Error trying to get the current user.")
+		fmt.Println("Error trying to get the current user.")
 		os.Exit(1)
 	}
 
 	if u.Uid != "0" {
-		fmt.Printf("Docker RBD Plugin requires root priveleges.")
+		fmt.Println("Docker RBD Plugin requires root priveleges.")
 		os.Exit(1)
 	}
 
@@ -69,7 +69,7 @@ func Run(ctx *cli.Context) {
 	}
 
 	if !b {
-		fmt.Printf("The requested ceph pool %v for docker volumes does not exist in the ceph cluster.", ctx.String("pool"))
+		fmt.Printf("The requested ceph pool %v for docker volumes does not exist in the ceph cluster.\n", ctx.String("pool"))
 	}
 
 	d, err := rbddriver.NewRbdDriver(ctx.String("pool"), ctx.String("default-size"))
