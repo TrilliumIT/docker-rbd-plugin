@@ -43,28 +43,13 @@ func AcquireLock(image, tag string, expireSeconds int) (*rbdLock, error) {
 		return nil, fmt.Errorf("Error getting hostname while acquiring a lock for image %v.", image)
 	}
 
-	exp := time.Unix(1<<63-62135596801, 999999999)
+	var ti *time.Ticker
 	if expireSeconds > 0 {
-		exp = time.Now().Add(expiresIn)
+		ti = time.NewTicker(refresh)
 	}
 
-	rl := &rbdLock{hostname: hn, image: image, tag: tag}
-
-	_, err = rl.addLock(exp)
-	if err != nil {
-		log.Errorf(err.Error())
-		return nil, fmt.Errorf("Error creating initial lock.")
-	}
-
-	if expireSeconds > 0 {
-		rl.open = make(chan struct{})
-		go rl.refreshLoop(refresh)
-	}
-
-	err = rl.reapLocks()
-	if err != nil {
-		log.WithError(err).WithField("image", rl.image).Warning("Error while reaping locks.")
-	}
+	rl := &rbdLock{hostname: hn, image: image, tag: tag, ticker: ti, open: make(chan struct{})}
+	go rl.refreshLoop(expiresIn)
 
 	return rl, nil
 }
@@ -86,7 +71,13 @@ func (rl *rbdLock) addLock(expires time.Time) (string, error) {
 }
 
 func (rl *rbdLock) refreshLock(expiresIn time.Duration) error {
-	lid, err := rl.addLock(time.Now().Add(expiresIn))
+	exp := time.Now().Add(expiresIn)
+
+	if expiresIn.Seconds() == 0 {
+		exp = time.Unix(1<<63-62135596801, 999999999)
+	}
+
+	lid, err := rl.addLock(exp)
 	if err != nil {
 		log.WithError(err).WithField("image", rl.image).Error("Error adding lock to image.")
 	}
@@ -150,9 +141,14 @@ func (rl *rbdLock) release() error {
 	return nil
 }
 
-func (rl *rbdLock) refreshLoop(refreshInterval time.Duration) {
-	rl.ticker = time.NewTicker(refreshInterval)
-	expiresIn := time.Second * time.Duration(refreshInterval.Seconds()/float64(DRP_REFRESH_PERCENT/100.0))
+func (rl *rbdLock) refreshLoop(expiresIn time.Duration) {
+	if expiresIn.Seconds() == 0 {
+		err := rl.refreshLock(expiresIn)
+		if err != nil {
+			log.WithError(err).WithField("image", rl.image).Error("Error while creating a fixed lock on image.")
+		}
+		return
+	}
 
 	for {
 		select {
