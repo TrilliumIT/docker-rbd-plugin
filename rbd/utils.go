@@ -97,7 +97,9 @@ func GetImages(pool string) ([]string, error) {
 	return images, nil
 }
 
-func ImageExists(pool, name string) (bool, error) {
+func ImageExists(image string) (bool, error) {
+	pool := strings.Split(image, "/")[0]
+
 	images, err := GetImages(pool)
 	if err != nil {
 		log.Errorf(err.Error())
@@ -105,7 +107,7 @@ func ImageExists(pool, name string) (bool, error) {
 	}
 
 	for _, img := range images {
-		if img == name {
+		if image == pool+"/"+img {
 			return true, nil
 		}
 	}

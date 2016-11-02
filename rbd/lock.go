@@ -1,7 +1,6 @@
 package rbddriver
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,36 +10,36 @@ import (
 	log "github.com/Sirupsen/logrus"
 )
 
-const (
-	DRP_REFRESH_PERCENT = 50
-)
-
 type rbdLock struct {
 	hostname string
-	image    string
+	img      *rbdImage
 	tag      string
 	ticker   *time.Ticker
 	open     chan struct{}
 }
 
-func AcquireLock(image, tag string, expireSeconds int) (*rbdLock, error) {
-	expiresIn := time.Duration(expireSeconds) * time.Second
-	refresh := time.Duration(int(float32(expireSeconds)*(DRP_REFRESH_PERCENT/100.0))) * time.Second
-
-	b, err := IsImageLocked(image)
+func AcquireLock(img *rbdImage, tag string, expireSeconds int) (*rbdLock, error) {
+	b, err := img.IsLocked()
 	if err != nil {
 		log.Errorf(err.Error())
-		return nil, fmt.Errorf("Error trying to determine if image %v is currently locked.", image)
+		return nil, fmt.Errorf("Error trying to determine if image %v is currently locked.", img.image)
 	}
 
 	if b {
 		return nil, fmt.Errorf("Image already has a valid lock held.")
 	}
 
+	return InheritLock(img, tag, expireSeconds)
+}
+
+func InheritLock(img *rbdImage, tag string, expireSeconds int) (*rbdLock, error) {
+	expiresIn := time.Duration(expireSeconds) * time.Second
+	refresh := time.Duration(int(float32(expireSeconds)*(DRP_REFRESH_PERCENT/100.0))) * time.Second
+
 	hn, err := os.Hostname()
 	if err != nil {
 		log.Errorf(err.Error())
-		return nil, fmt.Errorf("Error getting hostname while acquiring a lock for image %v.", image)
+		return nil, fmt.Errorf("Error getting hostname while acquiring a lock for image %v.", img.image)
 	}
 
 	var ti *time.Ticker
@@ -48,8 +47,8 @@ func AcquireLock(image, tag string, expireSeconds int) (*rbdLock, error) {
 		ti = time.NewTicker(refresh)
 	}
 
-	rl := &rbdLock{hostname: hn, image: image, tag: tag, ticker: ti, open: make(chan struct{})}
-	err = rl.reapLocks()
+	rl := &rbdLock{hostname: hn, img: img, tag: tag, ticker: ti, open: make(chan struct{})}
+	err = rl.img.reapLocks()
 	if err != nil {
 		log.Errorf(err.Error())
 		return rl, fmt.Errorf("Error while reaping old locks before adding our initial lock.")
@@ -59,17 +58,13 @@ func AcquireLock(image, tag string, expireSeconds int) (*rbdLock, error) {
 	return rl, nil
 }
 
-func AcquireFixedLock(image, tag string) (*rbdLock, error) {
-	return AcquireLock(image, tag, 0)
-}
-
 func (rl *rbdLock) addLock(expires time.Time) (string, error) {
 	lid := rl.hostname + "," + expires.Format(time.RFC3339Nano)
 
-	err := exec.Command("rbd", "lock", "add", "--shared", rl.tag, rl.image, lid).Run()
+	err := exec.Command("rbd", "lock", "add", "--shared", rl.tag, rl.img.image, lid).Run()
 	if err != nil {
 		log.Errorf(err.Error())
-		return "", fmt.Errorf("Failed to add lock to image %v.", rl.image)
+		return "", fmt.Errorf("Failed to add lock to image %v.", rl.img.image)
 	}
 
 	return lid, nil
@@ -79,18 +74,18 @@ func (rl *rbdLock) refreshLock(expiresIn time.Duration) error {
 	exp := time.Now().Add(expiresIn)
 
 	if expiresIn.Seconds() == 0 {
-		exp = time.Unix(1<<63-62135596801, 999999999)
+		exp = DRP_END_OF_TIME
 	}
 
 	lid, err := rl.addLock(exp)
 	if err != nil {
-		log.WithError(err).WithField("image", rl.image).Error("Error adding lock to image.")
+		log.WithError(err).WithField("image", rl.img.image).Error("Error adding lock to image.")
 	}
 
-	locks, err := getImageLocks(rl.image)
+	locks, err := rl.img.GetAllLocks()
 	if err != nil {
 		log.Errorf(err.Error())
-		return fmt.Errorf("Error retrieving locks for image %v.", rl.image)
+		return fmt.Errorf("Error retrieving locks for image %v.", rl.img.image)
 	}
 
 	for k, v := range locks {
@@ -104,17 +99,7 @@ func (rl *rbdLock) refreshLock(expiresIn time.Duration) error {
 			continue
 		}
 
-		rl.removeLock(k, v["locker"])
-	}
-
-	return nil
-}
-
-func (rl *rbdLock) removeLock(id, locker string) error {
-	err := exec.Command("rbd", "lock", "rm", rl.image, id, locker).Run()
-	if err != nil {
-		log.Errorf(err.Error())
-		return fmt.Errorf("Error removing lock from image %v with id %v.", rl.image, id)
+		rl.img.removeLock(k, v["locker"])
 	}
 
 	return nil
@@ -127,10 +112,10 @@ func (rl *rbdLock) release() error {
 		close(rl.open)
 	}
 
-	locks, err := getImageLocks(rl.image)
+	locks, err := rl.img.GetAllLocks()
 	if err != nil {
 		log.Errorf(err.Error())
-		return fmt.Errorf("Error while getting locks for image %v.", rl.image)
+		return fmt.Errorf("Error while getting locks for image %v.", rl.img.image)
 	}
 
 	for k, v := range locks {
@@ -140,7 +125,7 @@ func (rl *rbdLock) release() error {
 			continue
 		}
 
-		rl.removeLock(k, v["locker"])
+		rl.img.removeLock(k, v["locker"])
 	}
 
 	return nil
@@ -149,7 +134,7 @@ func (rl *rbdLock) release() error {
 func (rl *rbdLock) refreshLoop(expiresIn time.Duration) {
 	err := rl.refreshLock(expiresIn)
 	if err != nil {
-		log.WithError(err).WithField("image", rl.image).Error("Error while creating a initial lock on image.")
+		log.WithError(err).WithField("image", rl.img.image).Error("Error while creating a initial lock on image.")
 		return
 	}
 
@@ -161,85 +146,14 @@ func (rl *rbdLock) refreshLoop(expiresIn time.Duration) {
 	for {
 		select {
 		case <-rl.open:
-			log.WithField("image", rl.image).Debug("Lock channel shut, closing refresh loop")
+			log.WithField("image", rl.img.image).Debug("Lock channel shut, closing refresh loop")
 			return
 		case <-rl.ticker.C:
 			err := rl.refreshLock(expiresIn)
 			if err != nil {
-				log.WithError(err).WithField("image", rl.image).Error("Error refreshing lock.")
+				log.WithError(err).WithField("image", rl.img.image).Error("Error refreshing lock.")
 				continue
 			}
 		}
 	}
-}
-
-func (rl *rbdLock) reapLocks() error {
-	locks, err := getImageLocks(rl.image)
-	if err != nil {
-		log.Errorf(err.Error())
-		return fmt.Errorf("Error while getting locks for image %v.", rl.image)
-	}
-
-	for k, v := range locks {
-		lock := strings.Split(k, ",")
-
-		t, err := time.Parse(time.RFC3339Nano, lock[1])
-		if err != nil {
-			log.WithError(err).WithField("lock id", k).Warning("Error while parsing time from lock id.")
-			continue
-		}
-
-		if time.Now().After(t) {
-			log.WithFields(log.Fields{
-				"lock id": k,
-				"locker":  v["locker"],
-				"address": v["address"],
-			}).Info("Reaping expired lock.")
-			rl.removeLock(k, v["locker"])
-		}
-	}
-
-	return nil
-}
-
-func getImageLocks(image string) (map[string]map[string]string, error) {
-	bytes, err := exec.Command("rbd", "lock", "list", "--format", "json", image).Output()
-	if err != nil {
-		log.Errorf(err.Error())
-		return nil, fmt.Errorf("Failed to get locks for image %v.", image)
-	}
-
-	var locks map[string]map[string]string
-	err = json.Unmarshal(bytes, &locks)
-	if err != nil {
-		log.Errorf(err.Error())
-		return nil, fmt.Errorf("Failed to unmarshal json: %v", string(bytes))
-	}
-
-	return locks, nil
-}
-
-func IsImageLocked(image string) (bool, error) {
-	locks, err := getImageLocks(image)
-	if err != nil {
-		log.Errorf(err.Error())
-		return false, fmt.Errorf("Error while getting locks for image %v.", image)
-	}
-
-	for k := range locks {
-		lock := strings.Split(k, ",")
-
-		t, err := time.Parse(time.RFC3339Nano, lock[1])
-		if err != nil {
-			log.Warningf(err.Error())
-			log.Warningf("Error while parsing time from lock id %v.", k)
-			continue
-		}
-
-		if time.Now().Before(t) {
-			return true, nil
-		}
-	}
-
-	return false, nil
 }

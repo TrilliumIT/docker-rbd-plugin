@@ -1,82 +1,75 @@
 package rbddriver
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	log "github.com/Sirupsen/logrus"
 )
 
-const (
-	DRP_DEFAULT_LOCK_REFRESH = 60
-)
-
 type rbdImage struct {
-	pool       string
-	name       string
+	image      string
 	activeLock *rbdLock
 }
 
-func LoadRbdImage(pool, name string) (*rbdImage, error) {
-	fullname := pool + "/" + name
-
-	b, err := ImageExists(pool, name)
+func LoadRbdImage(image string) (*rbdImage, error) {
+	b, err := ImageExists(image)
 	if err != nil {
 		log.Errorf(err.Error())
-		return nil, fmt.Errorf("Error trying to determine if image %v already exists.", fullname)
+		return nil, fmt.Errorf("Error trying to determine if image %v already exists.", image)
 	}
 
 	if !b {
-		return nil, fmt.Errorf("Image %v does not exists, cannot load.", fullname)
+		return nil, fmt.Errorf("Image %v does not exists, cannot load.", image)
 	}
 
-	return &rbdImage{pool: pool, name: name}, nil
+	return &rbdImage{image: image}, nil
 }
 
-func CreateRbdImage(pool, name, size, fs string) (*rbdImage, error) {
-	fullname := pool + "/" + name
-
-	b, err := ImageExists(pool, name)
+func CreateRbdImage(image, size, fs string) (*rbdImage, error) {
+	b, err := ImageExists(image)
 	if err != nil {
 		log.Errorf(err.Error())
-		return nil, fmt.Errorf("Error trying to determine if image %v already exists.", fullname)
+		return nil, fmt.Errorf("Error trying to determine if image %v already exists.", image)
 	}
 
 	if b {
-		log.Warningf("Tried to create existing image %v, loading it instead.", fullname)
-		return LoadRbdImage(pool, name)
+		log.Warningf("Tried to create existing image %v, loading it instead.", image)
+		return LoadRbdImage(image)
 	}
 
-	err = exec.Command("rbd", "create", fullname, "--size", size).Run()
+	err = exec.Command("rbd", "create", image, "--size", size).Run()
 	if err != nil {
 		log.Errorf(err.Error())
-		return nil, fmt.Errorf("Error trying to create the image %v.", fullname)
+		return nil, fmt.Errorf("Error trying to create the image %v.", image)
 	}
 	defer func() {
 		if err != nil {
 			log.Errorf("Detected error after creating image %v, removing.")
-			_ = exec.Command("rbd", "remove", fullname).Run()
+			_ = exec.Command("rbd", "remove", image).Run()
 		}
 	}()
 
-	img, err := LoadRbdImage(pool, name)
+	img, err := LoadRbdImage(image)
 	if err != nil {
 		log.Errorf(err.Error())
-		return nil, fmt.Errorf("Failed to load the newly created blank image %v.", fullname)
+		return nil, fmt.Errorf("Failed to load the newly created blank image %v.", image)
 	}
 
 	dev, err := img.mapDevice("create_mkfs_lock")
 	if err != nil {
 		log.Errorf(err.Error())
-		return nil, fmt.Errorf("Failed to map the newly created blank image %v.", fullname)
+		return nil, fmt.Errorf("Failed to map the newly created blank image %v.", image)
 	}
 	defer func() {
 		if err != nil {
-			log.Errorf("Detected error after mapping image %v, unmapping.", fullname)
+			log.Errorf("Detected error after mapping image %v, unmapping.", image)
 			_ = img.unmapDevice("create_mkfs_lock")
 		}
 	}()
@@ -84,7 +77,7 @@ func CreateRbdImage(pool, name, size, fs string) (*rbdImage, error) {
 	err = exec.Command("mkfs."+fs, dev).Run()
 	if err != nil {
 		log.Errorf(err.Error())
-		return nil, fmt.Errorf("Failed to create the filesystem on device %v for image %v.", dev, fullname)
+		return nil, fmt.Errorf("Failed to create the filesystem on device %v for image %v.", dev, image)
 	}
 
 	err = img.unmapDevice("create_mkfs_lock")
@@ -93,16 +86,29 @@ func CreateRbdImage(pool, name, size, fs string) (*rbdImage, error) {
 		//set err back to nil to prevent our image from being destroyed
 		//it should be a good image at this point
 		err = nil
-		return img, fmt.Errorf("Failed to unmap device %v after creating image %v.", dev, fullname)
+		return img, fmt.Errorf("Failed to unmap device %v after creating image %v.", dev, image)
 	}
 
 	return img, nil
 }
 
+func (img *rbdImage) ShortName() string {
+	names := strings.Split(img.image, "/")
+	if len(names) > 0 {
+		return strings.Join(names[1:], "/")
+	}
+	return names[0]
+}
+
+func (img *rbdImage) PoolName() string {
+	names := strings.Split(img.image, "/")
+	return names[0]
+}
+
 func (img *rbdImage) IsMapped() (bool, error) {
 	mapping, err := img.GetMapping()
 	if err != nil {
-		log.Errorf("Failed to get mapping for image %v.", img.FullName())
+		log.Errorf("Failed to get mapping for image %v.", img.image)
 		return false, err
 	}
 
@@ -116,12 +122,12 @@ func (img *rbdImage) IsMapped() (bool, error) {
 func (img *rbdImage) GetDevice() (string, error) {
 	mapping, err := img.GetMapping()
 	if err != nil {
-		log.Errorf("Failed to get mapping for image %v.", img.FullName())
+		log.Errorf("Failed to get mapping for image %v.", img.image)
 		return "", err
 	}
 
 	if mapping == nil {
-		return "", fmt.Errorf("Image %v is not mapped, cannot retrieve the device.", img.FullName())
+		return "", fmt.Errorf("Image %v is not mapped, cannot retrieve the device.", img.image)
 	}
 
 	return mapping["device"], nil
@@ -131,7 +137,7 @@ func (img *rbdImage) IsMounted() (bool, error) {
 	b, err := img.IsMapped()
 	if err != nil {
 		log.Errorf(err.Error())
-		return false, fmt.Errorf("Error trying to determine if image %v is mapped.", img.FullName())
+		return false, fmt.Errorf("Error trying to determine if image %v is mapped.", img.image)
 	}
 
 	if !b {
@@ -141,7 +147,7 @@ func (img *rbdImage) IsMounted() (bool, error) {
 	dev, err := img.GetDevice()
 	if err != nil {
 		log.Errorf(err.Error())
-		return false, fmt.Errorf("Failed to get device from image %v.", img.FullName())
+		return false, fmt.Errorf("Failed to get device from image %v.", img.image)
 	}
 
 	mounts, err := GetMounts()
@@ -158,7 +164,7 @@ func (img *rbdImage) IsMounted() (bool, error) {
 func (img *rbdImage) GetMountPoint() (string, error) {
 	dev, err := img.GetDevice()
 	if err != nil {
-		return "", fmt.Errorf("Failed to get device from image %v.", img.FullName())
+		return "", fmt.Errorf("Failed to get device from image %v.", img.image)
 	}
 
 	mounts, err := GetMounts()
@@ -175,15 +181,11 @@ func (img *rbdImage) GetMountPoint() (string, error) {
 	return mnt.MountPoint, nil
 }
 
-func (img *rbdImage) FullName() string {
-	return img.pool + "/" + img.name
-}
-
 func (img *rbdImage) mapDevice(id string) (string, error) {
-	b, err := IsImageLocked(img.FullName())
+	b, err := img.IsLocked()
 	if err != nil {
 		log.Errorf(err.Error())
-		return "", fmt.Errorf("Error trying to determine if image %v was already locked.", img.FullName())
+		return "", fmt.Errorf("Error trying to determine if image %v was already locked.", img.image)
 	}
 
 	if b {
@@ -202,22 +204,22 @@ func (img *rbdImage) mapDevice(id string) (string, error) {
 	b, err = img.IsMapped()
 	if err != nil {
 		log.Errorf(err.Error())
-		return "", fmt.Errorf("Failed to detrimine if image %v is already mapped.", img.FullName())
+		return "", fmt.Errorf("Failed to detrimine if image %v is already mapped.", img.image)
 	}
 
 	if b {
 		dev, err := img.GetDevice()
 		if err != nil {
 			log.Errorf(err.Error())
-			return "", fmt.Errorf("Image %v is already mapped and failed to get the device.", img.FullName())
+			return "", fmt.Errorf("Image %v is already mapped and failed to get the device.", img.image)
 		}
 
-		log.Warningf("Image %v is already mapped to %v. Acquiring a lock for it.", img.FullName(), dev)
+		log.Warningf("Image %v is already mapped to %v. Acquiring a lock for it.", img.image, dev)
 
 		err = img.lock(id, refresh)
 		if err != nil {
 			log.Errorf(err.Error())
-			return "", fmt.Errorf("Error acquiring lock on image %v with id %v.", img.FullName(), id)
+			return "", fmt.Errorf("Error acquiring lock on image %v with id %v.", img.image, id)
 		}
 
 		return dev, nil
@@ -226,7 +228,7 @@ func (img *rbdImage) mapDevice(id string) (string, error) {
 	err = img.lock(id, refresh)
 	if err != nil {
 		log.Errorf(err.Error())
-		return "", fmt.Errorf("Error acquiring lock on image %v with id %v.", img.FullName(), id)
+		return "", fmt.Errorf("Error acquiring lock on image %v with id %v.", img.image, id)
 	}
 	defer func() {
 		if err != nil {
@@ -234,10 +236,10 @@ func (img *rbdImage) mapDevice(id string) (string, error) {
 		}
 	}()
 
-	out, err := exec.Command("rbd", "map", img.FullName()).Output()
+	out, err := exec.Command("rbd", "map", img.image).Output()
 	if err != nil {
 		log.Errorf(err.Error())
-		return "", fmt.Errorf("Failed to map the image %v.", img.FullName())
+		return "", fmt.Errorf("Failed to map the image %v.", img.image)
 	}
 
 	return strings.TrimSpace(string(out)), nil
@@ -247,40 +249,40 @@ func (img *rbdImage) unmapDevice(lockid string) error {
 	b, err := img.IsMounted()
 	if err != nil {
 		log.Errorf(err.Error())
-		return fmt.Errorf("Failed to determine if image %v is currently mounted", img.FullName())
+		return fmt.Errorf("Failed to determine if image %v is currently mounted", img.image)
 	}
 
 	if b {
-		return fmt.Errorf("Cannot unmap image %v because it is currently mounted.", img.FullName())
+		return fmt.Errorf("Cannot unmap image %v because it is currently mounted.", img.image)
 	}
 
 	b, err = img.IsMapped()
 	if err != nil {
 		log.Errorf(err.Error())
-		return fmt.Errorf("Failed to determine if image %v is mapped.", img.FullName())
+		return fmt.Errorf("Failed to determine if image %v is mapped.", img.image)
 	}
 
 	if !b {
 		err = img.unlock()
 		if err != nil {
 			log.Errorf(err.Error())
-			return fmt.Errorf("Error unlocking non mapped image %v.", img.FullName())
+			return fmt.Errorf("Error unlocking non mapped image %v.", img.image)
 		}
 
-		return fmt.Errorf("Image %v is not currently mapped to a device, removed lock if present.", img.FullName())
+		return fmt.Errorf("Image %v is not currently mapped to a device, removed lock if present.", img.image)
 	}
 
-	err = exec.Command("rbd", "unmap", img.FullName()).Run()
+	err = exec.Command("rbd", "unmap", img.image).Run()
 	if err != nil {
 		log.Errorf(err.Error())
 
-		return fmt.Errorf("Error while trying to unmap the image %v.", img.FullName())
+		return fmt.Errorf("Error while trying to unmap the image %v.", img.image)
 	}
 
 	err = img.unlock()
 	if err != nil {
 		log.Errorf(err.Error())
-		return fmt.Errorf("Error unlocking image %v.", img.FullName())
+		return fmt.Errorf("Error unlocking image %v.", img.image)
 	}
 
 	return nil
@@ -290,36 +292,36 @@ func (img *rbdImage) Remove() error {
 	b, err := img.IsMounted()
 	if err != nil {
 		log.Errorf(err.Error())
-		return fmt.Errorf("Error trying to determine if image %v is currently mounted", img.FullName())
+		return fmt.Errorf("Error trying to determine if image %v is currently mounted", img.image)
 	}
 
 	if b {
-		return fmt.Errorf("Cannot remove image %v because it is currently mounted.", img.FullName())
+		return fmt.Errorf("Cannot remove image %v because it is currently mounted.", img.image)
 	}
 
 	b, err = img.IsMapped()
 	if err != nil {
 		log.Errorf(err.Error())
-		return fmt.Errorf("Error trying to determine if image %v is mapped.", img.FullName())
+		return fmt.Errorf("Error trying to determine if image %v is mapped.", img.image)
 	}
 
 	if b {
-		return fmt.Errorf("Cannot remove image %v because it is currently mapped.", img.FullName())
+		return fmt.Errorf("Cannot remove image %v because it is currently mapped.", img.image)
 	}
 
-	b, err = IsImageLocked(img.FullName())
+	b, err = img.IsLocked()
 	if err != nil {
 		log.Errorf(err.Error())
-		return fmt.Errorf("Error tyring to determine if image %v is locked.", img.FullName())
+		return fmt.Errorf("Error tyring to determine if image %v is locked.", img.image)
 	}
 
 	if b {
-		return fmt.Errorf("Cannot remove image %v because it is currently locked by %v.", img.FullName(), img.activeLock.hostname)
+		return fmt.Errorf("Cannot remove image %v because it is currently locked by %v.", img.image, img.activeLock.hostname)
 	}
 
-	err = exec.Command("rbd", "remove", img.FullName()).Run()
+	err = exec.Command("rbd", "remove", img.image).Run()
 	if err != nil {
-		log.Errorf("Error while trying to remove image %v.", img.FullName())
+		log.Errorf("Error while trying to remove image %v.", img.image)
 		return err
 	}
 
@@ -329,28 +331,24 @@ func (img *rbdImage) Remove() error {
 func (img *rbdImage) GetMapping() (map[string]string, error) {
 	mappings, err := GetMappings()
 	if err != nil {
-		log.Errorf("Failed to retrive the rbd mappings.")
-		return nil, err
+		log.Errorf(err.Error())
+		return nil, fmt.Errorf("Error getting rbd mappings.")
 	}
 
-	for _, rbd := range mappings {
-		if rbd["pool"] != img.pool {
-			continue
-		}
-
-		if rbd["name"] == img.name {
-			return rbd, nil
+	for _, v := range mappings {
+		if img.image == v["pool"]+"/"+v["name"] {
+			return v, nil
 		}
 	}
 
-	return nil, nil
+	return nil, fmt.Errorf("Image %v doesn't seem to be mapped.", img.image)
 }
 
 func (img *rbdImage) lock(tag string, refresh int) error {
-	lock, err := AcquireLock(img.FullName(), tag, refresh)
+	lock, err := AcquireLock(img, tag, refresh)
 	if err != nil {
 		log.Errorf(err.Error())
-		return fmt.Errorf("Error while acquiring a lock for image %v with tag %v and refresh %v.", img.FullName(), tag, refresh)
+		return fmt.Errorf("Error while acquiring a lock for image %v with tag %v and refresh %v.", img.image, tag, refresh)
 	}
 
 	img.activeLock = lock
@@ -362,7 +360,7 @@ func (img *rbdImage) unlock() error {
 	err := img.activeLock.release()
 	if err != nil {
 		log.Errorf(err.Error())
-		return fmt.Errorf("Error while releasing a lock for image %v.", img.FullName())
+		return fmt.Errorf("Error while releasing a lock for image %v.", img.image)
 	}
 
 	img.activeLock = nil
@@ -374,7 +372,7 @@ func (img *rbdImage) Mount(lockid string) (string, error) {
 	b, err := img.IsMounted()
 	if err != nil {
 		log.Errorf(err.Error())
-		return "", fmt.Errorf("Error determining if image %v is already mounted.", img.FullName())
+		return "", fmt.Errorf("Error determining if image %v is already mounted.", img.image)
 	}
 
 	if b {
@@ -383,7 +381,7 @@ func (img *rbdImage) Mount(lockid string) (string, error) {
 			log.Errorf(err.Error())
 			return "", fmt.Errorf("Device for image %v is already mounted, failed to get the mountpoint.")
 		}
-		log.Warningf("Image %v is already mounted at %v.", img.FullName(), mp)
+		log.Warningf("Image %v is already mounted at %v.", img.image, mp)
 		return mp, nil
 	}
 
@@ -391,7 +389,7 @@ func (img *rbdImage) Mount(lockid string) (string, error) {
 	if mp == "" {
 		mp = "/var/lib/docker-volumes/rbd"
 	}
-	mp += "/" + img.FullName()
+	mp += "/" + img.image
 
 	err = os.MkdirAll(mp, 0755)
 	if err != nil {
@@ -402,7 +400,7 @@ func (img *rbdImage) Mount(lockid string) (string, error) {
 	dev, err := img.mapDevice(lockid)
 	if err != nil {
 		log.Errorf(err.Error())
-		return mp, fmt.Errorf("Error mapping image %v to device.", img.FullName())
+		return mp, fmt.Errorf("Error mapping image %v to device.", img.image)
 	}
 	defer func() {
 		if err != nil {
@@ -413,7 +411,7 @@ func (img *rbdImage) Mount(lockid string) (string, error) {
 	out, err := exec.Command("blkid", "-s", "TYPE", "-o", "value", dev).Output()
 	if err != nil {
 		log.Errorf(err.Error())
-		return dev, fmt.Errorf("Error running blkid to determine the filesystem type of image %v on dev %v.", img.FullName(), dev)
+		return dev, fmt.Errorf("Error running blkid to determine the filesystem type of image %v on dev %v.", img.image, dev)
 	}
 
 	fs := strings.TrimSpace(string(out))
@@ -432,36 +430,210 @@ func (img *rbdImage) Unmount(lockid string) error {
 	b, err := img.IsMounted()
 	if err != nil {
 		log.Errorf(err.Error())
-		return fmt.Errorf("Error determining if image %v is mounted.", img.FullName())
+		return fmt.Errorf("Error determining if image %v is mounted.", img.image)
 	}
 
 	if !b {
 		err = img.unmapDevice(lockid)
 		if err != nil {
 			log.Errorf(err.Error())
-			return fmt.Errorf("Error unmapping image %v from device.", img.FullName())
+			return fmt.Errorf("Error unmapping image %v from device.", img.image)
 		}
-		log.Warningf("Tried to unmount a device that was not mounted for image %v.", img.FullName())
+		log.Warningf("Tried to unmount a device that was not mounted for image %v.", img.image)
 		return nil
 	}
 
 	mp, err := img.GetMountPoint()
 	if err != nil {
 		log.Errorf(err.Error())
-		return fmt.Errorf("Error determining the path of device for image %v.", img.FullName())
+		return fmt.Errorf("Error determining the path of device for image %v.", img.image)
 	}
 
 	err = syscall.Unmount(mp, 0)
 	if err != nil {
 		log.Errorf(err.Error())
-		return fmt.Errorf("Error while trying to unmount image %v from path %v.", img.FullName, mp)
+		return fmt.Errorf("Error while trying to unmount image %v from path %v.", img.image, mp)
 	}
 
 	err = img.unmapDevice(lockid)
 	if err != nil {
 		log.Errorf(err.Error())
-		return fmt.Errorf("Error unmapping image %v.", img.FullName())
+		return fmt.Errorf("Error unmapping image %v.", img.image)
 	}
 
 	return nil
+}
+
+func (img *rbdImage) GetLockHost() (string, error) {
+	locks, err := img.GetValidLocks()
+	if err != nil {
+		log.Errorf(err.Error())
+		return "", fmt.Errorf("Error while getting valid locks for image %v.", img.image)
+	}
+
+	for k := range locks {
+		lock := strings.Split(k, ",")
+		return lock[0], nil
+	}
+
+	return "", fmt.Errorf("Image %v is not currently locked.", img.image)
+}
+
+func (img *rbdImage) GetAllLocks() (map[string]map[string]string, error) {
+	bytes, err := exec.Command("rbd", "lock", "list", "--format", "json", img.image).Output()
+	if err != nil {
+		log.Errorf(err.Error())
+		return nil, fmt.Errorf("Failed to get locks for image %v.", img.image)
+	}
+
+	var locks map[string]map[string]string
+	err = json.Unmarshal(bytes, &locks)
+	if err != nil {
+		log.Errorf(err.Error())
+		return nil, fmt.Errorf("Failed to unmarshal json: %v", string(bytes))
+	}
+
+	return locks, nil
+}
+
+func (img *rbdImage) GetValidLocks() (map[string]map[string]string, error) {
+	locks, err := img.GetAllLocks()
+	if err != nil {
+		log.Errorf(err.Error())
+		return nil, fmt.Errorf("Error while getting locks for image %v.", img.image)
+	}
+
+	vlocks := make(map[string]map[string]string)
+
+	for k, v := range locks {
+		lock := strings.Split(k, ",")
+
+		t, err := time.Parse(time.RFC3339Nano, lock[1])
+		if err != nil {
+			log.Warningf(err.Error())
+			log.Warningf("Error while parsing time from lock id %v.", k)
+			continue
+		}
+
+		if time.Now().Before(t) {
+			vlocks[k] = v
+		}
+	}
+
+	return vlocks, nil
+}
+
+func (img *rbdImage) IsLocked() (bool, error) {
+	locks, err := img.GetValidLocks()
+	if err != nil {
+		log.Errorf(err.Error())
+		return false, fmt.Errorf("Error while getting valid locks for image %v.", img.image)
+	}
+
+	return len(locks) > 0, nil
+}
+
+func (img *rbdImage) EmergencyUnmap() error {
+	dev, err := img.GetDevice()
+	if err != nil {
+		log.Errorf(err.Error())
+		return fmt.Errorf("Error getting image %v mapping.", img.image)
+	}
+
+	err = exec.Command("fuser", "-k", "-m", dev).Run()
+	if err != nil {
+		log.WithError(err).Error("Error during fuser kill. Good if there were no processes, bad if we couldn't kill the processes.")
+	}
+
+	mp, err := img.GetMountPoint()
+	if err != nil {
+		log.WithError(err).WithField("image", img.image).Error("Error getting the mountpoint.")
+	}
+
+	if mp != "" {
+		log.WithField("image", img.image).Info("Attempting emergency unmount.")
+		err = syscall.Unmount(mp, 0)
+		if err != nil {
+			log.WithError(err).WithField("image", img.image).Error("Error unmounting.")
+		}
+	}
+
+	err = exec.Command("rbd", "unmap", img.image).Run()
+	if err != nil {
+		log.Errorf(err.Error())
+		return fmt.Errorf("Error while trying to unmap the image %v.", img.image)
+	}
+
+	return nil
+}
+
+func (img *rbdImage) reapLocks() error {
+	locks, err := img.GetAllLocks()
+	if err != nil {
+		log.Errorf(err.Error())
+		return fmt.Errorf("Error while getting locks for image %v.", img.image)
+	}
+
+	for k, v := range locks {
+		lock := strings.Split(k, ",")
+
+		t, err := time.Parse(time.RFC3339Nano, lock[1])
+		if err != nil {
+			log.WithError(err).WithField("lock id", k).Warning("Error while parsing time from lock id.")
+			continue
+		}
+
+		if time.Now().After(t) {
+			log.WithFields(log.Fields{
+				"lock id": k,
+				"locker":  v["locker"],
+				"address": v["address"],
+			}).Info("Reaping expired lock.")
+			img.removeLock(k, v["locker"])
+		}
+	}
+
+	return nil
+}
+
+func (img *rbdImage) removeLock(id, locker string) error {
+	err := exec.Command("rbd", "lock", "rm", img.image, id, locker).Run()
+	if err != nil {
+		log.Errorf(err.Error())
+		return fmt.Errorf("Error removing lock from image %v with id %v.", img.image, id)
+	}
+
+	return nil
+}
+
+func (img *rbdImage) GetCephLockTag() (string, error) {
+	bytes, err := exec.Command("sh", "-c", fmt.Sprintf("rbd lock list %v | grep 'Lock tag' | awk '{print $3}'", img.image)).Output()
+	if err != nil {
+		log.Error(err.Error())
+		return "", fmt.Errorf("Lock tag not found for image %v.", img.image)
+	}
+
+	return strings.TrimSpace(string(bytes)), nil
+}
+
+func (img *rbdImage) GetCephLockExpiration() (time.Time, error) {
+	exp := time.Now()
+
+	locks, err := img.GetValidLocks()
+	if err != nil {
+		log.Error(err.Error())
+		return exp, fmt.Errorf("Error getting valid locks for image %v.", img.image)
+	}
+
+	err = fmt.Errorf("No valid locks found for image %v.", img.image)
+	for k := range locks {
+		lock := strings.Split(k, ",")
+		var t time.Time
+		t, err = time.Parse(time.RFC3339Nano, lock[1])
+		if t.After(exp) {
+			exp = t
+		}
+	}
+
+	return exp, err
 }
