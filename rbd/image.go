@@ -565,11 +565,11 @@ func (img *rbdImage) EmergencyUnmap(containerid string) error {
 		log.Info("Killing container with id %v.", containerid)
 		err = exec.Command("docker", "kill", containerid).Run()
 		if err != nil {
-			log.WithError(err).Warning("Error killing container %v.", containerid)
+			log.WithError(err).Warningf("Error killing container %v.", containerid)
 		}
 	}
 
-	log.Info("Killing all processes accessing %v.", dev)
+	log.Infof("Killing all processes accessing %v.", dev)
 	err = exec.Command("sh", "-c", fmt.Sprintf("kill -9 $(lsof -t %v)", dev)).Run()
 	if err != nil {
 		log.WithError(err).Error("Error killing all processes accessing the device.")
@@ -588,7 +588,7 @@ func (img *rbdImage) EmergencyUnmap(containerid string) error {
 		}
 	}
 
-	log.Info("Attempting unmap of image %v.", img.image)
+	log.Infof("Attempting unmap of image %v.", img.image)
 	err = exec.Command("rbd", "unmap", img.image).Run()
 	if err != nil {
 		log.Errorf(err.Error())
