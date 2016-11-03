@@ -124,3 +124,46 @@ func PoolExists(pool string) (bool, error) {
 
 	return true, nil
 }
+
+func GetImagesInUse() (map[string]struct{}, error) {
+	images := make(map[string]struct{})
+	dirs, err := ioutil.ReadDir(DRP_DOCKER_CONTAINER_DIR)
+	if err != nil {
+		log.Error(err.Error())
+		return images, fmt.Errorf("Error reading container directory %v.", DRP_DOCKER_CONTAINER_DIR)
+	}
+
+	for _, d := range dirs {
+		if !d.IsDir() {
+			continue
+		}
+
+		bytes, err := ioutil.ReadFile(DRP_DOCKER_CONTAINER_DIR + "/" + d.Name() + "/config.v2.json")
+		if err != nil {
+			log.WithError(err).WithField("container", d.Name()).Warning("Error reading config.v2.json for container.")
+			continue
+		}
+
+		var config map[string]interface{}
+		err = json.Unmarshal(bytes, &config)
+		if err != nil {
+			log.WithError(err).WithField("container", d.Name()).Warning("Error during unmarshal of config json.")
+			continue
+		}
+
+		state := config["State"].(map[string]interface{})
+		if !state["Running"].(bool) {
+			continue
+		}
+
+		mps := config["MountPoints"].(map[string]interface{})
+		for _, v := range mps {
+			m := v.(map[string]interface{})
+			if m["Driver"].(string) == "rbd" {
+				images[m["Name"].(string)] = struct{}{}
+			}
+		}
+	}
+
+	return images, nil
+}

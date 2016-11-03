@@ -44,6 +44,7 @@ func CreateRbdImage(image, size, fs string) (*rbdImage, error) {
 		return LoadRbdImage(image)
 	}
 
+	log.Debugf("Executing: rbd create %v --size %v", image, size)
 	err = exec.Command("rbd", "create", image, "--size", size).Run()
 	if err != nil {
 		log.Errorf(err.Error())
@@ -70,7 +71,7 @@ func CreateRbdImage(image, size, fs string) (*rbdImage, error) {
 	defer func() {
 		if err != nil {
 			log.Errorf("Detected error after mapping image %v, unmapping.", image)
-			_ = img.unmapDevice("create_mkfs_lock")
+			_ = img.unmapDevice()
 		}
 	}()
 
@@ -80,7 +81,7 @@ func CreateRbdImage(image, size, fs string) (*rbdImage, error) {
 		return nil, fmt.Errorf("Failed to create the filesystem on device %v for image %v.", dev, image)
 	}
 
-	err = img.unmapDevice("create_mkfs_lock")
+	err = img.unmapDevice()
 	if err != nil {
 		log.Errorf(err.Error())
 		//set err back to nil to prevent our image from being destroyed
@@ -106,17 +107,19 @@ func (img *rbdImage) PoolName() string {
 }
 
 func (img *rbdImage) IsMapped() (bool, error) {
-	mapping, err := img.GetMapping()
+	mappings, err := GetMappings()
 	if err != nil {
-		log.Errorf("Failed to get mapping for image %v.", img.image)
-		return false, err
+		log.Errorf(err.Error())
+		return false, fmt.Errorf("Error getting rbd mappings.")
 	}
 
-	if mapping == nil {
-		return false, nil
+	for _, v := range mappings {
+		if img.image == v["pool"]+"/"+v["name"] {
+			return true, nil
+		}
 	}
 
-	return true, nil
+	return false, nil
 }
 
 func (img *rbdImage) GetDevice() (string, error) {
@@ -189,7 +192,20 @@ func (img *rbdImage) mapDevice(id string) (string, error) {
 	}
 
 	if b {
-		return "", fmt.Errorf("Cannot map a locked image.")
+		hn, err := os.Hostname()
+		if err != nil {
+			log.WithError(err).Error("Error getting my hostname.")
+		}
+
+		who, err := img.GetLockHost()
+		if err != nil {
+			log.WithError(err).WithField("image", img.image).Error("Error finding image locking host.")
+		}
+
+		if who != hn {
+			return "", fmt.Errorf("Cannot map a locked image.")
+		}
+		log.Warningf("Discovered a lock on image %v, but it's me. Continuing anyway", img.image)
 	}
 
 	refresh := DRP_DEFAULT_LOCK_REFRESH
@@ -245,7 +261,7 @@ func (img *rbdImage) mapDevice(id string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-func (img *rbdImage) unmapDevice(lockid string) error {
+func (img *rbdImage) unmapDevice() error {
 	b, err := img.IsMounted()
 	if err != nil {
 		log.Errorf(err.Error())
@@ -316,7 +332,12 @@ func (img *rbdImage) Remove() error {
 	}
 
 	if b {
-		return fmt.Errorf("Cannot remove image %v because it is currently locked by %v.", img.image, img.activeLock.hostname)
+		who := ""
+		who, err = img.GetLockHost()
+		if err != nil {
+			log.WithError(err).WithField("image", img.image).Error("Error finding image locking host.")
+		}
+		return fmt.Errorf("Cannot remove image %v because it is currently locked by %v.", img.image, who)
 	}
 
 	err = exec.Command("rbd", "remove", img.image).Run()
@@ -404,7 +425,7 @@ func (img *rbdImage) Mount(lockid string) (string, error) {
 	}
 	defer func() {
 		if err != nil {
-			_ = img.unmapDevice(lockid)
+			_ = img.unmapDevice()
 		}
 	}()
 
@@ -426,7 +447,7 @@ func (img *rbdImage) Mount(lockid string) (string, error) {
 	return mp, nil
 }
 
-func (img *rbdImage) Unmount(lockid string) error {
+func (img *rbdImage) Unmount() error {
 	b, err := img.IsMounted()
 	if err != nil {
 		log.Errorf(err.Error())
@@ -434,7 +455,7 @@ func (img *rbdImage) Unmount(lockid string) error {
 	}
 
 	if !b {
-		err = img.unmapDevice(lockid)
+		err = img.unmapDevice()
 		if err != nil {
 			log.Errorf(err.Error())
 			return fmt.Errorf("Error unmapping image %v from device.", img.image)
@@ -455,7 +476,7 @@ func (img *rbdImage) Unmount(lockid string) error {
 		return fmt.Errorf("Error while trying to unmount image %v from path %v.", img.image, mp)
 	}
 
-	err = img.unmapDevice(lockid)
+	err = img.unmapDevice()
 	if err != nil {
 		log.Errorf(err.Error())
 		return fmt.Errorf("Error unmapping image %v.", img.image)
@@ -540,9 +561,9 @@ func (img *rbdImage) EmergencyUnmap() error {
 		return fmt.Errorf("Error getting image %v mapping.", img.image)
 	}
 
-	err = exec.Command("fuser", "-k", "-m", dev).Run()
+	err = exec.Command("sh", "-c", fmt.Sprintf("kill -9 $(lsof -t %v)", dev)).Run()
 	if err != nil {
-		log.WithError(err).Error("Error during fuser kill. Good if there were no processes, bad if we couldn't kill the processes.")
+		log.WithError(err).Error("Error killing all processes accessing the device.")
 	}
 
 	mp, err := img.GetMountPoint()
