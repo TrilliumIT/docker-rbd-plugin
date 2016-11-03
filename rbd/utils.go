@@ -132,8 +132,8 @@ func PoolExists(pool string) (bool, error) {
 	return true, nil
 }
 
-func GetImagesInUse(pool string) (map[string]struct{}, error) {
-	images := make(map[string]struct{})
+func GetImagesInUse(pool string) (map[string]string, error) {
+	images := make(map[string]string)
 	dirs, err := ioutil.ReadDir(DRP_DOCKER_CONTAINER_DIR)
 	if err != nil {
 		log.Error(err.Error())
@@ -167,7 +167,7 @@ func GetImagesInUse(pool string) (map[string]struct{}, error) {
 		for _, v := range mps {
 			m := v.(map[string]interface{})
 			if m["Driver"].(string) == "rbd" {
-				images[pool+"/"+m["Name"].(string)] = struct{}{}
+				images[pool+"/"+m["Name"].(string)] = d.Name()
 			}
 		}
 	}

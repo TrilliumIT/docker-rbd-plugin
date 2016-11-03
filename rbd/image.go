@@ -554,13 +554,22 @@ func (img *rbdImage) IsLocked() (bool, error) {
 	return len(locks) > 0, nil
 }
 
-func (img *rbdImage) EmergencyUnmap() error {
+func (img *rbdImage) EmergencyUnmap(containerid string) error {
 	dev, err := img.GetDevice()
 	if err != nil {
 		log.Errorf(err.Error())
 		return fmt.Errorf("Error getting image %v mapping.", img.image)
 	}
 
+	if containerid != "" {
+		log.Info("Killing container with id %v.", containerid)
+		err = exec.Command("docker", "kill", containerid).Run()
+		if err != nil {
+			log.WithError(err).Warning("Error killing container %v.", containerid)
+		}
+	}
+
+	log.Info("Killing all processes accessing %v.", dev)
 	err = exec.Command("sh", "-c", fmt.Sprintf("kill -9 $(lsof -t %v)", dev)).Run()
 	if err != nil {
 		log.WithError(err).Error("Error killing all processes accessing the device.")
@@ -579,6 +588,7 @@ func (img *rbdImage) EmergencyUnmap() error {
 		}
 	}
 
+	log.Info("Attempting unmap of image %v.", img.image)
 	err = exec.Command("rbd", "unmap", img.image).Run()
 	if err != nil {
 		log.Errorf(err.Error())

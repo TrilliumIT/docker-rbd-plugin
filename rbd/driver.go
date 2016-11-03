@@ -39,6 +39,14 @@ func NewRbdDriver(pool, ds string) (*RbdDriver, error) {
 		log.Errorf(err.Error())
 		return nil, fmt.Errorf("Error getting initial mappings.")
 	}
+	log.WithField("Current Mappings", mappings).Debug("Currently mapped images.")
+
+	var used map[string]string
+	used, err = GetImagesInUse(pool)
+	if err != nil {
+		log.WithError(err).Error("Error getting images in use.")
+	}
+	log.WithField("Used Images", used).Debug("Images detected in use.")
 
 	for _, m := range mappings {
 		hn, err := os.Hostname()
@@ -69,9 +77,10 @@ func NewRbdDriver(pool, ds string) (*RbdDriver, error) {
 
 			if who != hn {
 				log.Error("Found a local map that is locked by someone else! Running emergency unmap!")
-				err := img.EmergencyUnmap()
+				containerid, _ := used[image]
+				err := img.EmergencyUnmap(containerid)
 				if err != nil {
-					log.WithError(err).WithField("image", img.image).Error("Error while doing an emergency unmap. I hope your data is not corrupted.")
+					log.WithError(err).WithField("image", image).Error("Error while doing an emergency unmap. I hope your data is not corrupted.")
 				}
 				continue
 			}
@@ -97,14 +106,6 @@ func NewRbdDriver(pool, ds string) (*RbdDriver, error) {
 		img.activeLock, err = InheritLock(img, tag, expireSeconds)
 		mnts[img.image] = img
 	}
-
-	var used map[string]struct{}
-	used, err = GetImagesInUse(pool)
-	if err != nil {
-		log.WithError(err).Error("Error getting images in use.")
-	}
-
-	log.WithField("Used Images", used).Debug("Images detected in use.")
 
 	for k := range mnts {
 		if _, ok := used[k]; !ok {
