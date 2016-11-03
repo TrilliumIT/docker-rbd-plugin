@@ -63,7 +63,7 @@ func GetMounts() (map[string]*mount, error) {
 	return mounts, nil
 }
 
-func GetMappings() (map[string]map[string]string, error) {
+func GetMappings(pool string) (map[string]map[string]string, error) {
 	bytes, err := exec.Command("rbd", "showmapped", "--format", "json").Output()
 	if err != nil {
 		log.Errorf(err.Error())
@@ -77,7 +77,14 @@ func GetMappings() (map[string]map[string]string, error) {
 		return nil, fmt.Errorf("Failed to unmarshal json: %v", string(bytes))
 	}
 
-	return mappings, nil
+	mymappings := make(map[string]map[string]string)
+	for k, v := range mappings {
+		if v["pool"] == pool {
+			mymappings[k] = v
+		}
+	}
+
+	return mymappings, nil
 }
 
 func GetImages(pool string) ([]string, error) {
@@ -125,7 +132,7 @@ func PoolExists(pool string) (bool, error) {
 	return true, nil
 }
 
-func GetImagesInUse() (map[string]struct{}, error) {
+func GetImagesInUse(pool string) (map[string]struct{}, error) {
 	images := make(map[string]struct{})
 	dirs, err := ioutil.ReadDir(DRP_DOCKER_CONTAINER_DIR)
 	if err != nil {
@@ -160,7 +167,7 @@ func GetImagesInUse() (map[string]struct{}, error) {
 		for _, v := range mps {
 			m := v.(map[string]interface{})
 			if m["Driver"].(string) == "rbd" {
-				images[m["Name"].(string)] = struct{}{}
+				images[pool+"/"+m["Name"].(string)] = struct{}{}
 			}
 		}
 	}

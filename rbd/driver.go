@@ -34,7 +34,7 @@ func NewRbdDriver(pool, ds string) (*RbdDriver, error) {
 
 	mnts := make(map[string]*rbdImage)
 
-	mappings, err := GetMappings()
+	mappings, err := GetMappings(pool)
 	if err != nil {
 		log.Errorf(err.Error())
 		return nil, fmt.Errorf("Error getting initial mappings.")
@@ -99,17 +99,22 @@ func NewRbdDriver(pool, ds string) (*RbdDriver, error) {
 	}
 
 	var used map[string]struct{}
-	used, err = GetImagesInUse()
+	used, err = GetImagesInUse(pool)
 	if err != nil {
 		log.WithError(err).Error("Error getting images in use.")
 	}
+
+	log.WithField("Used Images", used).Debug("Images detected in use.")
 
 	for k := range mnts {
 		if _, ok := used[k]; !ok {
 			log.WithField("image", k).Info("Unmounting and unmapping unused device")
 			mnts[k].Unmount()
+			delete(mnts, k)
 		}
 	}
+
+	log.WithField("Startup mnts", mnts).Debug("Starting up with these mnts.")
 
 	return &RbdDriver{pool: pool, defaultSize: ds, mounts: mnts, mutex: &sync.Mutex{}}, nil
 }

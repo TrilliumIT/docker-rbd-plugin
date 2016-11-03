@@ -107,7 +107,7 @@ func (img *rbdImage) PoolName() string {
 }
 
 func (img *rbdImage) IsMapped() (bool, error) {
-	mappings, err := GetMappings()
+	mappings, err := GetMappings(img.PoolName())
 	if err != nil {
 		log.Errorf(err.Error())
 		return false, fmt.Errorf("Error getting rbd mappings.")
@@ -350,7 +350,7 @@ func (img *rbdImage) Remove() error {
 }
 
 func (img *rbdImage) GetMapping() (map[string]string, error) {
-	mappings, err := GetMappings()
+	mappings, err := GetMappings(img.PoolName())
 	if err != nil {
 		log.Errorf(err.Error())
 		return nil, fmt.Errorf("Error getting rbd mappings.")
