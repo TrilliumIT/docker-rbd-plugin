@@ -272,12 +272,8 @@ func (rd *RbdDriver) Mount(req volume.MountRequest) volume.Response {
 
 	rd.mutex.Lock()
 	defer rd.mutex.Unlock()
-	delete(rd.mounts, req.Name)
 
 	image := rd.pool + "/" + req.Name
-
-	rd.mutex.Lock()
-	defer rd.mutex.Unlock()
 
 	img, ok := rd.mounts[image]
 	if !ok {
@@ -298,7 +294,7 @@ func (rd *RbdDriver) Mount(req volume.MountRequest) volume.Response {
 		return volume.Response{Err: msg}
 	}
 
-	rd.mounts[req.Name] = img
+	rd.mounts[image] = img
 
 	return volume.Response{Mountpoint: mp, Err: ""}
 }
@@ -312,7 +308,7 @@ func (rd *RbdDriver) Unmount(req volume.UnmountRequest) volume.Response {
 	defer rd.mutex.Unlock()
 	img, ok := rd.mounts[image]
 	if !ok {
-		msg := fmt.Sprintf("Could not find image object for %v.", image)
+		msg := fmt.Sprintf("Could not find image object for %v in %v.", image, rd.mounts)
 		log.Errorf(msg)
 		return volume.Response{Err: msg}
 	}
