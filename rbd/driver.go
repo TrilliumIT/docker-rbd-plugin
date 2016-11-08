@@ -268,6 +268,7 @@ func (rd *RbdDriver) Path(req volume.Request) volume.Response {
 func (rd *RbdDriver) Mount(req volume.MountRequest) volume.Response {
 	log.WithField("Request", req).Debug("Mount")
 	var err error
+	var img *rbdImage
 
 	rd.mutex.Lock()
 	defer rd.mutex.Unlock()
@@ -275,12 +276,18 @@ func (rd *RbdDriver) Mount(req volume.MountRequest) volume.Response {
 
 	image := rd.pool + "/" + req.Name
 
-	img, err := LoadRbdImage(image)
-	if err != nil {
-		log.Errorf(err.Error())
-		msg := fmt.Sprintf("Error generating data structure for image %v.", image)
-		log.Errorf(msg)
-		return volume.Response{Err: msg}
+	rd.mutex.Lock()
+	defer rd.mutex.Unlock()
+
+	img, ok := rd.mounts[image]
+	if !ok {
+		img, err = LoadRbdImage(image)
+		if err != nil {
+			log.Errorf(err.Error())
+			msg := fmt.Sprintf("Error loading image %v.", image)
+			log.Errorf(msg)
+			return volume.Response{Err: msg}
+		}
 	}
 
 	mp, err := img.Mount(req.ID)
