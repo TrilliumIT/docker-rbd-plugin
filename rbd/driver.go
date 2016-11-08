@@ -41,7 +41,7 @@ func NewRbdDriver(pool, ds string) (*RbdDriver, error) {
 	}
 	log.WithField("Current Mappings", mappings).Debug("Currently mapped images.")
 
-	var used map[string]string
+	var used map[string][]*container
 	used, err = GetImagesInUse(pool)
 	if err != nil {
 		log.WithError(err).Error("Error getting images in use.")
@@ -77,19 +77,15 @@ func NewRbdDriver(pool, ds string) (*RbdDriver, error) {
 
 			if who != hn {
 				log.Error("Found a local map that is locked by someone else! Running emergency unmap!")
-				containerid, _ := used[image]
-				err := img.EmergencyUnmap(containerid)
-				if err != nil {
-					log.WithError(err).WithField("image", image).Error("Error while doing an emergency unmap. I hope your data is not corrupted.")
+				containers, _ := used[image]
+				for _, c := range containers {
+					err := img.EmergencyUnmap(c.containerid)
+					if err != nil {
+						log.WithError(err).WithField("image", image).Error("Error while doing an emergency unmap. I hope your data is not corrupted.")
+					}
 				}
 				continue
 			}
-		}
-
-		tag, err := img.GetCephLockTag()
-		if err != nil {
-			log.WithError(err).WithField("image", img.image).Warning("Error getting lock tag.")
-			tag = "dummy_string_tag"
 		}
 
 		exp, err := img.GetCephLockExpiration()
@@ -103,16 +99,19 @@ func NewRbdDriver(pool, ds string) (*RbdDriver, error) {
 			expireSeconds = 0
 		}
 
-		img.activeLock, err = InheritLock(img, tag, expireSeconds)
-		mnts[img.image] = img
-	}
-
-	for k := range mnts {
-		if _, ok := used[k]; !ok {
-			log.WithField("image", k).Info("Unmounting and unmapping unused device")
-			mnts[k].Unmount()
-			delete(mnts, k)
+		img.activeLock, err = InheritLock(img, expireSeconds)
+		containers, ok := used[img.image]
+		if !ok {
+			log.WithField("image", img.image).Info("Unmounting and unmapping unused device")
+			img.Unmount("")
+			continue
 		}
+
+		for _, c := range containers {
+			img.users[c.mountid] = struct{}{}
+		}
+
+		mnts[img.image] = img
 	}
 
 	log.WithField("Startup mnts", mnts).Debug("Starting up with these mnts.")
@@ -311,7 +310,7 @@ func (rd *RbdDriver) Unmount(req volume.UnmountRequest) volume.Response {
 		return volume.Response{Err: msg}
 	}
 
-	err := img.Unmount()
+	err := img.Unmount(req.ID)
 	if err != nil {
 		log.Errorf(err.Error())
 		msg := fmt.Sprintf("Error unmounting image %v.", image)

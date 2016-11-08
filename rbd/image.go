@@ -16,6 +16,7 @@ import (
 type rbdImage struct {
 	image      string
 	activeLock *rbdLock
+	users      map[string]struct{}
 }
 
 func LoadRbdImage(image string) (*rbdImage, error) {
@@ -63,7 +64,7 @@ func CreateRbdImage(image, size, fs string) (*rbdImage, error) {
 		return nil, fmt.Errorf("Failed to load the newly created blank image %v.", image)
 	}
 
-	dev, err := img.mapDevice("create_mkfs_lock")
+	dev, err := img.mapDevice()
 	if err != nil {
 		log.Errorf(err.Error())
 		return nil, fmt.Errorf("Failed to map the newly created blank image %v.", image)
@@ -184,7 +185,7 @@ func (img *rbdImage) GetMountPoint() (string, error) {
 	return mnt.MountPoint, nil
 }
 
-func (img *rbdImage) mapDevice(id string) (string, error) {
+func (img *rbdImage) mapDevice() (string, error) {
 	b, err := img.IsLocked()
 	if err != nil {
 		log.Errorf(err.Error())
@@ -232,19 +233,19 @@ func (img *rbdImage) mapDevice(id string) (string, error) {
 
 		log.Warningf("Image %v is already mapped to %v. Acquiring a lock for it.", img.image, dev)
 
-		err = img.lock(id, refresh)
+		err = img.lock(refresh)
 		if err != nil {
 			log.Errorf(err.Error())
-			return "", fmt.Errorf("Error acquiring lock on image %v with id %v.", img.image, id)
+			return "", fmt.Errorf("Error acquiring lock on image %v.", img.image)
 		}
 
 		return dev, nil
 	}
 
-	err = img.lock(id, refresh)
+	err = img.lock(refresh)
 	if err != nil {
 		log.Errorf(err.Error())
-		return "", fmt.Errorf("Error acquiring lock on image %v with id %v.", img.image, id)
+		return "", fmt.Errorf("Error acquiring lock on image %v.", img.image)
 	}
 	defer func() {
 		if err != nil {
@@ -365,11 +366,11 @@ func (img *rbdImage) GetMapping() (map[string]string, error) {
 	return nil, fmt.Errorf("Image %v doesn't seem to be mapped.", img.image)
 }
 
-func (img *rbdImage) lock(tag string, refresh int) error {
-	lock, err := AcquireLock(img, tag, refresh)
+func (img *rbdImage) lock(refresh int) error {
+	lock, err := AcquireLock(img, refresh)
 	if err != nil {
 		log.Errorf(err.Error())
-		return fmt.Errorf("Error while acquiring a lock for image %v with tag %v and refresh %v.", img.image, tag, refresh)
+		return fmt.Errorf("Error while acquiring a lock for image %v with refresh %v.", img.image, refresh)
 	}
 
 	img.activeLock = lock
@@ -389,7 +390,7 @@ func (img *rbdImage) unlock() error {
 	return nil
 }
 
-func (img *rbdImage) Mount(lockid string) (string, error) {
+func (img *rbdImage) Mount(mountid string) (string, error) {
 	b, err := img.IsMounted()
 	if err != nil {
 		log.Errorf(err.Error())
@@ -402,7 +403,7 @@ func (img *rbdImage) Mount(lockid string) (string, error) {
 			log.Errorf(err.Error())
 			return "", fmt.Errorf("Device for image %v is already mounted, failed to get the mountpoint.")
 		}
-		log.Warningf("Image %v is already mounted at %v.", img.image, mp)
+		img.users[mountid] = struct{}{}
 		return mp, nil
 	}
 
@@ -418,7 +419,7 @@ func (img *rbdImage) Mount(lockid string) (string, error) {
 		return mp, fmt.Errorf("Error creating new mount point directory at %v.", mp)
 	}
 
-	dev, err := img.mapDevice(lockid)
+	dev, err := img.mapDevice()
 	if err != nil {
 		log.Errorf(err.Error())
 		return mp, fmt.Errorf("Error mapping image %v to device.", img.image)
@@ -444,10 +445,11 @@ func (img *rbdImage) Mount(lockid string) (string, error) {
 		return mp, fmt.Errorf("Error while trying to mount device %v.", dev)
 	}
 
+	img.users[mountid] = struct{}{}
 	return mp, nil
 }
 
-func (img *rbdImage) Unmount() error {
+func (img *rbdImage) Unmount(mountid string) error {
 	b, err := img.IsMounted()
 	if err != nil {
 		log.Errorf(err.Error())
@@ -461,6 +463,14 @@ func (img *rbdImage) Unmount() error {
 			return fmt.Errorf("Error unmapping image %v from device.", img.image)
 		}
 		log.Warningf("Tried to unmount a device that was not mounted for image %v.", img.image)
+		return nil
+	}
+
+	if mountid != "" {
+		delete(img.users, mountid)
+	}
+
+	if len(img.users) > 0 {
 		return nil
 	}
 
@@ -635,16 +645,6 @@ func (img *rbdImage) removeLock(id, locker string) error {
 	}
 
 	return nil
-}
-
-func (img *rbdImage) GetCephLockTag() (string, error) {
-	bytes, err := exec.Command("sh", "-c", fmt.Sprintf("rbd lock list %v | grep 'Lock tag' | awk '{print $3}'", img.image)).Output()
-	if err != nil {
-		log.Error(err.Error())
-		return "", fmt.Errorf("Lock tag not found for image %v.", img.image)
-	}
-
-	return strings.TrimSpace(string(bytes)), nil
 }
 
 func (img *rbdImage) GetCephLockExpiration() (time.Time, error) {

@@ -21,6 +21,11 @@ type mount struct {
 	FsckOrder  int
 }
 
+type container struct {
+	containerid string
+	mountid     string
+}
+
 func GetMounts() (map[string]*mount, error) {
 	mounts := make(map[string]*mount)
 
@@ -132,8 +137,8 @@ func PoolExists(pool string) (bool, error) {
 	return true, nil
 }
 
-func GetImagesInUse(pool string) (map[string]string, error) {
-	images := make(map[string]string)
+func GetImagesInUse(pool string) (map[string][]*container, error) {
+	images := make(map[string][]*container)
 	dirs, err := ioutil.ReadDir(DRP_DOCKER_CONTAINER_DIR)
 	if err != nil {
 		log.Error(err.Error())
@@ -167,7 +172,7 @@ func GetImagesInUse(pool string) (map[string]string, error) {
 		for _, v := range mps {
 			m := v.(map[string]interface{})
 			if m["Driver"].(string) == "rbd" {
-				images[pool+"/"+m["Name"].(string)] = d.Name()
+				images[pool+"/"+m["Name"].(string)] = append(images[pool+"/"+m["Name"].(string)], &container{containerid: d.Name(), mountid: m["ID"].(string)})
 			}
 		}
 	}

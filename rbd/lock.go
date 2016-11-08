@@ -10,15 +10,18 @@ import (
 	log "github.com/Sirupsen/logrus"
 )
 
+const (
+	DRP_LOCK_TAG_SUFFIX = "_docker-rbd-plugin"
+)
+
 type rbdLock struct {
 	hostname string
 	img      *rbdImage
-	tag      string
 	ticker   *time.Ticker
 	open     chan struct{}
 }
 
-func AcquireLock(img *rbdImage, tag string, expireSeconds int) (*rbdLock, error) {
+func AcquireLock(img *rbdImage, expireSeconds int) (*rbdLock, error) {
 	b, err := img.IsLocked()
 	if err != nil {
 		log.Errorf(err.Error())
@@ -29,10 +32,10 @@ func AcquireLock(img *rbdImage, tag string, expireSeconds int) (*rbdLock, error)
 		return nil, fmt.Errorf("Image already has a valid lock held.")
 	}
 
-	return InheritLock(img, tag, expireSeconds)
+	return InheritLock(img, expireSeconds)
 }
 
-func InheritLock(img *rbdImage, tag string, expireSeconds int) (*rbdLock, error) {
+func InheritLock(img *rbdImage, expireSeconds int) (*rbdLock, error) {
 	expiresIn := time.Duration(expireSeconds) * time.Second
 	refresh := time.Duration(int(float32(expireSeconds)*(DRP_REFRESH_PERCENT/100.0))) * time.Second
 
@@ -47,7 +50,7 @@ func InheritLock(img *rbdImage, tag string, expireSeconds int) (*rbdLock, error)
 		ti = time.NewTicker(refresh)
 	}
 
-	rl := &rbdLock{hostname: hn, img: img, tag: tag, ticker: ti, open: make(chan struct{})}
+	rl := &rbdLock{hostname: hn, img: img, ticker: ti, open: make(chan struct{})}
 	err = rl.img.reapLocks()
 	if err != nil {
 		log.Errorf(err.Error())
@@ -60,8 +63,9 @@ func InheritLock(img *rbdImage, tag string, expireSeconds int) (*rbdLock, error)
 
 func (rl *rbdLock) addLock(expires time.Time) (string, error) {
 	lid := rl.hostname + "," + expires.Format(time.RFC3339Nano)
+	tag := rl.hostname + DRP_LOCK_TAG_SUFFIX
 
-	err := exec.Command("rbd", "lock", "add", "--shared", rl.tag, rl.img.image, lid).Run()
+	err := exec.Command("rbd", "lock", "add", "--shared", tag, rl.img.image, lid).Run()
 	if err != nil {
 		log.Errorf(err.Error())
 		return "", fmt.Errorf("Failed to add lock to image %v.", rl.img.image)
@@ -139,7 +143,7 @@ func (rl *rbdLock) refreshLoop(expiresIn time.Duration) {
 	}
 
 	if expiresIn.Seconds() == 0 {
-		log.WithField("lock tag", rl.tag).Info("Bypassing refresh loop for fixed lock.")
+		log.Info("Bypassing refresh loop for fixed lock.")
 		return
 	}
 
