@@ -303,9 +303,9 @@ func (rd *RbdDriver) Unmount(req volume.UnmountRequest) volume.Response {
 
 	rd.mutex.Lock()
 	defer rd.mutex.Unlock()
-	img, ok := rd.mounts[req.Name]
+	img, ok := rd.mounts[image]
 	if !ok {
-		msg := fmt.Sprintf("Could not find image object for %v.", req.Name)
+		msg := fmt.Sprintf("Could not find image object for %v.", image)
 		log.Errorf(msg)
 		return volume.Response{Err: msg}
 	}
