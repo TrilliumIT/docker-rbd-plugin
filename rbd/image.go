@@ -17,7 +17,6 @@ type rbdImage struct {
 	image      string
 	activeLock *rbdLock
 	users      map[string]struct{}
-	mapping    chan struct{}
 }
 
 func LoadRbdImage(image string) (*rbdImage, error) {
@@ -31,10 +30,7 @@ func LoadRbdImage(image string) (*rbdImage, error) {
 		return nil, fmt.Errorf("Image %v does not exists, cannot load.", image)
 	}
 
-	mapping := make(chan struct{})
-	close(mapping)
-
-	return &rbdImage{image: image, users: make(map[string]struct{}), mapping: mapping}, nil
+	return &rbdImage{image: image, users: make(map[string]struct{})}, nil
 }
 
 func CreateRbdImage(image, size, fs string) (*rbdImage, error) {
@@ -112,12 +108,6 @@ func (img *rbdImage) PoolName() string {
 }
 
 func (img *rbdImage) IsMapped() (bool, error) {
-	select {
-	case <-img.mapping:
-	default:
-		return true, nil
-	}
-
 	mappings, err := GetMappings(img.PoolName())
 	if err != nil {
 		log.Errorf(err.Error())
@@ -252,7 +242,6 @@ func (img *rbdImage) mapDevice() (string, error) {
 		return dev, nil
 	}
 
-	img.mapping = make(chan struct{})
 	err = img.lock(refresh)
 	if err != nil {
 		log.Errorf(err.Error())
@@ -265,7 +254,6 @@ func (img *rbdImage) mapDevice() (string, error) {
 	}()
 
 	out, err := exec.Command("rbd", "map", img.image).Output()
-	close(img.mapping)
 	if err != nil {
 		log.Errorf(err.Error())
 		return "", fmt.Errorf("Failed to map the image %v.", img.image)
