@@ -450,46 +450,56 @@ func (img *rbdImage) Mount(mountid string) (string, error) {
 }
 
 func (img *rbdImage) Unmount(mountid string) error {
-	b, err := img.IsMounted()
-	if err != nil {
-		log.Errorf(err.Error())
-		return fmt.Errorf("Error determining if image %v is mounted.", img.image)
-	}
-
-	if !b {
-		err = img.unmapDevice()
-		if err != nil {
-			log.Errorf(err.Error())
-			return fmt.Errorf("Error unmapping image %v from device.", img.image)
-		}
-		log.Warningf("Tried to unmount a device that was not mounted for image %v.", img.image)
-		return nil
-	}
-
 	if mountid != "" {
 		delete(img.users, mountid)
+	}
+
+	if mountid == "" {
+		img.users = make(map[string]struct{})
 	}
 
 	if len(img.users) > 0 {
 		return nil
 	}
 
-	mp, err := img.GetMountPoint()
+	b, err := img.IsMounted()
 	if err != nil {
 		log.Errorf(err.Error())
-		return fmt.Errorf("Error determining the path of device for image %v.", img.image)
+		return fmt.Errorf("Error determining if image %v is mounted.", img.image)
 	}
 
-	err = syscall.Unmount(mp, 0)
-	if err != nil {
-		log.Errorf(err.Error())
-		return fmt.Errorf("Error while trying to unmount image %v from path %v.", img.image, mp)
+	if b {
+		mp, err := img.GetMountPoint()
+		if err != nil {
+			log.Errorf(err.Error())
+			return fmt.Errorf("Error determining the path of device for image %v.", img.image)
+		}
+
+		err = syscall.Unmount(mp, 0)
+		if err != nil {
+			log.Errorf(err.Error())
+			return fmt.Errorf("Error while trying to unmount image %v from path %v.", img.image, mp)
+		}
 	}
 
-	err = img.unmapDevice()
+	b, err = img.IsMapped()
 	if err != nil {
 		log.Errorf(err.Error())
-		return fmt.Errorf("Error unmapping image %v.", img.image)
+		return fmt.Errorf("Error determining if image %v is mapped.", img.image)
+	}
+
+	if b {
+		err = img.unmapDevice()
+		if err != nil {
+			log.Errorf(err.Error())
+			return fmt.Errorf("Error unmapping image %v.", img.image)
+		}
+	}
+
+	err = img.unlock()
+	if err != nil {
+		log.Errorf(err.Error())
+		return fmt.Errorf("Error unlocking image %v.", img.image)
 	}
 
 	return nil
