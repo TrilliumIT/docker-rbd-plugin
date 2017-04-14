@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	version = "0.0.8"
+	version = "0.0.9"
 )
 
 func main() {
@@ -88,6 +88,6 @@ func Run(ctx *cli.Context) {
 
 	log.Debug("Launching volume handler.")
 	h := volume.NewHandler(d)
-	h.ServeUnix("root", "rbd")
+	h.ServeUnix("rbd", 0)
 
 }
