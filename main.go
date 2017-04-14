@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/signal"
 	"os/user"
+	"syscall"
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/TrilliumIT/docker-rbd-plugin/rbd"
@@ -13,7 +14,7 @@ import (
 )
 
 const (
-	version = "0.0.5"
+	version = "0.0.6"
 )
 
 func main() {

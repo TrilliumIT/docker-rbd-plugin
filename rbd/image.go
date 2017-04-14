@@ -499,6 +499,7 @@ func (img *rbdImage) Unmount(mountid string) error {
 	}
 
 	if img.users.len() > 0 {
+		log.Debugf("%v users still using the image %v", img.users.len(), img.image)
 		return nil
 	}
 
@@ -543,6 +544,7 @@ func (img *rbdImage) Unmount(mountid string) error {
 		return fmt.Errorf("Error unlocking image %v.", img.image)
 	}
 
+	log.Debugf("Image %v successfully unmounted.", img.image)
 	return nil
 }
 
