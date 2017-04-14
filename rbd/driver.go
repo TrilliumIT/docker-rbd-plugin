@@ -108,7 +108,7 @@ func NewRbdDriver(pool, ds string) (*RbdDriver, error) {
 		}
 
 		for _, c := range containers {
-			img.users[c.mountid] = struct{}{}
+			img.users.add(c.mountid)
 		}
 
 		mnts[img.image] = img

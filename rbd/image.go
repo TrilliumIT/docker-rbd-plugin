@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -16,7 +17,43 @@ import (
 type rbdImage struct {
 	image      string
 	activeLock *rbdLock
-	users      map[string]struct{}
+	users      *rbdUsers
+}
+
+type rbdUsers struct {
+	users map[string]struct{}
+	lock  sync.RWMutex
+}
+
+func (u *rbdUsers) add(id string) {
+	u.lock.Lock()
+	defer u.lock.Unlock()
+	u.users[id] = struct{}{}
+}
+
+func (u *rbdUsers) remove(id string) {
+	u.lock.Lock()
+	defer u.lock.Unlock()
+	delete(u.users, id)
+}
+
+func (u *rbdUsers) clear() {
+	u.lock.Lock()
+	defer u.lock.Unlock()
+	u.users = make(map[string]struct{})
+}
+
+func (u *rbdUsers) len() int {
+	u.lock.RLock()
+	defer u.lock.RUnlock()
+	return len(u.users)
+}
+
+func (u *rbdUsers) exists(id string) bool {
+	u.lock.RLock()
+	defer u.lock.RUnlock()
+	_, ok := u.users[id]
+	return ok
 }
 
 func LoadRbdImage(image string) (*rbdImage, error) {
@@ -30,7 +67,10 @@ func LoadRbdImage(image string) (*rbdImage, error) {
 		return nil, fmt.Errorf("Image %v does not exists, cannot load.", image)
 	}
 
-	return &rbdImage{image: image, users: make(map[string]struct{})}, nil
+	img := &rbdImage{image: image}
+	img.users.users = make(map[string]struct{})
+
+	return img, nil
 }
 
 func CreateRbdImage(image, size, fs string) (*rbdImage, error) {
@@ -402,7 +442,7 @@ func (img *rbdImage) Mount(mountid string) (string, error) {
 			log.Errorf(err.Error())
 			return "", fmt.Errorf("Device for image %v is already mounted, failed to get the mountpoint.")
 		}
-		img.users[mountid] = struct{}{}
+		img.users.add(mountid)
 		return mp, nil
 	}
 
@@ -444,21 +484,21 @@ func (img *rbdImage) Mount(mountid string) (string, error) {
 		return mp, fmt.Errorf("Error while trying to mount device %v.", dev)
 	}
 
-	img.users[mountid] = struct{}{}
+	img.users.add(mountid)
 	return mp, nil
 }
 
 // This refers to a docker unmount request. It SHOULD do more than just the syscall unmount
 func (img *rbdImage) Unmount(mountid string) error {
 	if mountid != "" {
-		delete(img.users, mountid)
+		img.users.remove(mountid)
 	}
 
 	if mountid == "" {
-		img.users = make(map[string]struct{})
+		img.users.clear()
 	}
 
-	if len(img.users) > 0 {
+	if img.users.len() > 0 {
 		return nil
 	}
 
