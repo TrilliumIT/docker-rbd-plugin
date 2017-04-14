@@ -54,12 +54,6 @@ func NewRbdDriver(pool, ds string) (*RbdDriver, error) {
 	log.WithField("Used Images", used).Debug("Images detected in use.")
 
 	for _, m := range mappings {
-		hn, err := os.Hostname()
-		if err != nil {
-			log.WithError(err).Error("Error getting my hostname.")
-			continue
-		}
-
 		image := m["pool"] + "/" + m["name"]
 		img, err := LoadRbdImage(image)
 		if err != nil {
@@ -74,23 +68,15 @@ func NewRbdDriver(pool, ds string) (*RbdDriver, error) {
 		}
 
 		if b {
-			who, err := img.GetLockHost()
-			if err != nil {
-				log.WithError(err).WithField("image", image).Error("Error finding image locking host.")
-				continue
-			}
-
-			if who != hn {
-				log.Error("Found a local map that is locked by someone else! Running emergency unmap!")
-				containers, _ := used[image]
-				for _, c := range containers {
-					err := img.EmergencyUnmap(c.containerid)
-					if err != nil {
-						log.WithError(err).WithField("image", image).Error("Error while doing an emergency unmap. I hope your data is not corrupted.")
-					}
+			log.Error("Found a local map that is locked by someone else! Running emergency unmap!")
+			containers, _ := used[image]
+			for _, c := range containers {
+				err := img.EmergencyUnmap(c.containerid)
+				if err != nil {
+					log.WithError(err).WithField("image", image).Error("Error while doing an emergency unmap. I hope your data is not corrupted.")
 				}
-				continue
 			}
+			continue
 		}
 
 		exp, err := img.GetCephLockExpiration()

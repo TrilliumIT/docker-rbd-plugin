@@ -230,20 +230,7 @@ func (img *rbdImage) mapDevice() (string, error) {
 	}
 
 	if b {
-		hn, err := os.Hostname()
-		if err != nil {
-			log.WithError(err).Error("Error getting my hostname.")
-		}
-
-		who, err := img.GetLockHost()
-		if err != nil {
-			log.WithError(err).WithField("image", img.image).Error("Error finding image locking host.")
-		}
-
-		if who != hn {
-			return "", fmt.Errorf("Cannot map a locked image.")
-		}
-		log.Warningf("Discovered a lock on image %v, but it's me. Continuing anyway", img.image)
+		return "", fmt.Errorf("Cannot map a locked image.")
 	}
 
 	refresh := DRP_DEFAULT_LOCK_REFRESH
@@ -365,12 +352,7 @@ func (img *rbdImage) Remove() error {
 	}
 
 	if b {
-		who := ""
-		who, err = img.GetLockHost()
-		if err != nil {
-			log.WithError(err).WithField("image", img.image).Error("Error finding image locking host.")
-		}
-		return fmt.Errorf("Cannot remove image %v because it is currently locked by %v.", img.image, who)
+		return fmt.Errorf("Cannot remove image %v because it is currently locked.", img.image)
 	}
 
 	err = exec.Command("rbd", "remove", img.image).Run()
@@ -545,21 +527,6 @@ func (img *rbdImage) Unmount(mountid string) error {
 	return nil
 }
 
-func (img *rbdImage) GetLockHost() (string, error) {
-	locks, err := img.GetValidLocks()
-	if err != nil {
-		log.Errorf(err.Error())
-		return "", fmt.Errorf("Error while getting valid locks for image %v.", img.image)
-	}
-
-	for k := range locks {
-		lock := strings.Split(k, ",")
-		return lock[0], nil
-	}
-
-	return "", fmt.Errorf("Image %v is not currently locked.", img.image)
-}
-
 func (img *rbdImage) GetAllLocks() (map[string]map[string]string, error) {
 	bytes, err := exec.Command("rbd", "lock", "list", "--format", "json", img.image).Output()
 	if err != nil {
@@ -611,7 +578,23 @@ func (img *rbdImage) IsLocked() (bool, error) {
 		return false, fmt.Errorf("Error while getting valid locks for image %v.", img.image)
 	}
 
-	return len(locks) > 0, nil
+	if len(locks) <= 0 {
+		return false, nil
+	}
+
+	hn, err := os.Hostname()
+	if err != nil {
+		log.WithError(err).Error("Error getting my hostname.")
+	}
+
+	for k := range locks {
+		lock := strings.Split(k, ",")
+		if lock[0] != hn {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 func (img *rbdImage) EmergencyUnmap(containerid string) error {
