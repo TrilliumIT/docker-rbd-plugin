@@ -26,6 +26,11 @@ type RbdDriver struct {
 	pool        string
 	mounts      map[string]*rbdImage
 	mutex       *sync.Mutex
+	unmountWg   *sync.WaitGroup
+}
+
+func (rd *RbdDriver) UnmountWait() {
+	rd.unmountWg.Wait()
 }
 
 func NewRbdDriver(pool, ds string) (*RbdDriver, error) {
@@ -313,6 +318,8 @@ func (rd *RbdDriver) Unmount(req volume.UnmountRequest) volume.Response {
 		return volume.Response{Err: msg}
 	}
 
+	rd.unmountWg.Add(1)
+	defer rd.unmountWg.Done()
 	err := img.Unmount(req.ID)
 	if err != nil {
 		log.Errorf(err.Error())

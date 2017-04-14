@@ -478,7 +478,7 @@ func (img *rbdImage) Mount(mountid string) (string, error) {
 	fs := strings.TrimSpace(string(out))
 
 	log.Infof("Mounting device %v to %v as %v filesystem.", dev, mp, fs)
-	err = syscall.Mount(dev, mp, fs, 0, "")
+	err = syscall.Mount(dev, mp, fs, syscall.MS_NOATIME, "")
 	if err != nil {
 		log.Errorf(err.Error())
 		return mp, fmt.Errorf("Error while trying to mount device %v.", dev)

@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/signal"
 	"os/user"
 
 	log "github.com/Sirupsen/logrus"
@@ -74,7 +75,18 @@ func Run(ctx *cli.Context) {
 		os.Exit(1)
 	}
 
+	c := make(chan os.Signal)
+	defer close(c)
+	signal.Notify(c, os.Interrupt)
+	signal.Notify(c, syscall.SIGTERM)
+	go func() {
+		<-c
+		d.UnmountWait()
+		os.Exit(0)
+	}()
+
 	log.Debug("Launching volume handler.")
 	h := volume.NewHandler(d)
 	h.ServeUnix("root", "rbd")
+
 }
