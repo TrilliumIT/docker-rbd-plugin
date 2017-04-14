@@ -25,8 +25,8 @@ type RbdDriver struct {
 	defaultSize string
 	pool        string
 	mounts      map[string]*rbdImage
-	mutex       *sync.Mutex
-	unmountWg   *sync.WaitGroup
+	mutex       sync.Mutex
+	unmountWg   sync.WaitGroup
 }
 
 func (rd *RbdDriver) UnmountWait() {
@@ -121,7 +121,7 @@ func NewRbdDriver(pool, ds string) (*RbdDriver, error) {
 
 	log.WithField("Startup mnts", mnts).Debug("Starting up with these mnts.")
 
-	return &RbdDriver{pool: pool, defaultSize: ds, mounts: mnts, mutex: &sync.Mutex{}}, nil
+	return &RbdDriver{pool: pool, defaultSize: ds, mounts: mnts, mutex: sync.Mutex{}}, nil
 }
 
 func (rd *RbdDriver) Create(req volume.Request) volume.Response {

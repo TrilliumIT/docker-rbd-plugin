@@ -67,10 +67,7 @@ func LoadRbdImage(image string) (*rbdImage, error) {
 		return nil, fmt.Errorf("Image %v does not exists, cannot load.", image)
 	}
 
-	img := &rbdImage{image: image}
-	img.users.users = make(map[string]struct{})
-
-	return img, nil
+	return &rbdImage{image: image, users: &rbdUsers{users: make(map[string]struct{})}}, nil
 }
 
 func CreateRbdImage(image, size, fs string) (*rbdImage, error) {
