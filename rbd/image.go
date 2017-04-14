@@ -279,26 +279,21 @@ func (img *rbdImage) unmapDevice() error {
 		return fmt.Errorf("Failed to determine if image %v is mapped.", img.image)
 	}
 
-	if !b {
-		err = img.unlock()
+	if b {
+		err = exec.Command("rbd", "unmap", img.image).Run()
 		if err != nil {
 			log.Errorf(err.Error())
-			return fmt.Errorf("Error unlocking non mapped image %v.", img.image)
+
+			return fmt.Errorf("Error while trying to unmap the image %v.", img.image)
 		}
-
-		return fmt.Errorf("Image %v is not currently mapped to a device, removed lock if present.", img.image)
-	}
-
-	err = exec.Command("rbd", "unmap", img.image).Run()
-	if err != nil {
-		log.Errorf(err.Error())
-
-		return fmt.Errorf("Error while trying to unmap the image %v.", img.image)
 	}
 
 	err = img.unlock()
 	if err != nil {
 		log.Errorf(err.Error())
+		if b {
+			return fmt.Errorf("Error unlocking image %v which was not mapped.", img.image)
+		}
 		return fmt.Errorf("Error unlocking image %v.", img.image)
 	}
 
@@ -379,6 +374,10 @@ func (img *rbdImage) lock(refresh int) error {
 }
 
 func (img *rbdImage) unlock() error {
+	if img.activeLock == nil {
+		return nil
+	}
+
 	err := img.activeLock.release()
 	if err != nil {
 		log.Errorf(err.Error())
@@ -449,6 +448,7 @@ func (img *rbdImage) Mount(mountid string) (string, error) {
 	return mp, nil
 }
 
+// This refers to a docker unmount request. It SHOULD do more than just the syscall unmount
 func (img *rbdImage) Unmount(mountid string) error {
 	if mountid != "" {
 		delete(img.users, mountid)
@@ -496,6 +496,7 @@ func (img *rbdImage) Unmount(mountid string) error {
 		}
 	}
 
+	// This is necessary in case a device is not mapped, but still locked for some reason.
 	err = img.unlock()
 	if err != nil {
 		log.Errorf(err.Error())
