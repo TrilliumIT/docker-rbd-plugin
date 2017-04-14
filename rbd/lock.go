@@ -75,14 +75,6 @@ func (rl *rbdLock) addLock(expires time.Time) (string, error) {
 }
 
 func (rl *rbdLock) refreshLock(expiresIn time.Duration) error {
-	mapped, err := rl.img.IsMapped()
-	if err != nil {
-		return err
-	}
-	if !mapped {
-		return rl.release()
-	}
-
 	exp := time.Now().Add(expiresIn)
 
 	if expiresIn.Seconds() == 0 {
@@ -99,6 +91,7 @@ func (rl *rbdLock) refreshLock(expiresIn time.Duration) error {
 		log.Errorf(err.Error())
 		return fmt.Errorf("Error retrieving locks for image %v.", rl.img.image)
 	}
+
 	for k, v := range locks {
 		if lid == k {
 			continue
