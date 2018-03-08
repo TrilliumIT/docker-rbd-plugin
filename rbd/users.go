@@ -1,6 +1,7 @@
 package rbddriver
 
 import (
+	"fmt"
 	"sync"
 )
 
@@ -31,4 +32,19 @@ func (u *rbdUsers) len() int {
 	u.lock.RLock()
 	defer u.lock.RUnlock()
 	return len(u.users)
+}
+
+func (u *rbdUsers) reconcile(image string) error {
+	conts, err := GetContainersUsingImage(image)
+	if err != nil {
+		return fmt.Errorf("failed to get image users")
+	}
+
+	u.clear()
+
+	for _, c := range conts {
+		u.add(c.MountID)
+	}
+
+	return nil
 }

@@ -450,13 +450,8 @@ func (img *RbdImage) Mount(mountid string) (string, error) {
 // Unmount refers to a docker unmount request. It SHOULD do more than just the syscall unmount
 // like validate no containers are using it, etc...
 func (img *RbdImage) Unmount(mountid string) error {
-	if mountid != "" {
-		img.users.remove(mountid)
-	}
-
-	if mountid == "" {
-		img.users.clear()
-	}
+	img.users.reconcile(img.image)
+	img.users.remove(mountid)
 
 	if img.users.len() > 0 {
 		log.Debugf("%v users still using the image %v", img.users.len(), img.image)
