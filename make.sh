@@ -42,7 +42,7 @@ check_versions() {
 }
 
 LATEST_RELEASE=$(git describe --tags --abbrev=0 | sed "s/^v//g")
-MAIN_VER=$(grep "\t*Version *= " main.go | sed 's/\t*Version *= //g' | sed 's/"//g')
+MAIN_VER=$(grep "\t*version *= " main.go | sed 's/\t*version *= //g' | sed 's/"//g')
 
 check_prerequisites || exit 1
 check_versions || exit 1
