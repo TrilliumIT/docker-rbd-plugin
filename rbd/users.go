@@ -32,10 +32,3 @@ func (u *rbdUsers) len() int {
 	defer u.lock.RUnlock()
 	return len(u.users)
 }
-
-func (u *rbdUsers) exists(id string) bool {
-	u.lock.RLock()
-	defer u.lock.RUnlock()
-	_, ok := u.users[id]
-	return ok
-}
