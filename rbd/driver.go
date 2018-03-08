@@ -110,7 +110,7 @@ func NewRbdDriver(pool, ds string) (*RbdDriver, error) {
 	return &RbdDriver{pool: pool, defaultSize: ds, mounts: mnts, mutex: sync.Mutex{}}, nil
 }
 
-func (rd *RbdDriver) Create(req volume.Request) volume.Response {
+func (rd *RbdDriver) Create(req *volume.CreateRequest) error {
 	log.WithField("Request", req).Debug("Create")
 
 	image := rd.pool + "/" + req.Name
@@ -131,34 +131,32 @@ func (rd *RbdDriver) Create(req volume.Request) volume.Response {
 	_, err := CreateRbdImage(image, size, fs)
 	if err != nil {
 		log.Errorf(err.Error())
-		msg := fmt.Sprintf("Error while creating image %v.", image)
-		log.Errorf(msg)
-		return volume.Response{Err: msg}
+		msg := fmt.Errorf("Error while creating image %v.", image)
+		return msg
 	}
 
-	return volume.Response{Err: ""}
+	return nil
 }
 
-func (rd *RbdDriver) List(req volume.Request) volume.Response {
-	log.WithField("Requst", req).Debug("List")
+func (rd *RbdDriver) List() (*volume.ListResponse, error) {
+	log.Debug("List")
 	var vols []*volume.Volume
 
 	imgs, err := GetImages(rd.pool)
 	if err != nil {
 		log.Errorf(err.Error())
-		msg := fmt.Sprintf("Failed to get list of images for pool %v.", rd.pool)
-		log.Errorf(msg)
-		return volume.Response{Volumes: nil, Err: msg}
+		msg := fmt.Errorf("Failed to get list of images for pool %v.", rd.pool)
+		return nil, msg
 	}
 
 	for _, v := range imgs {
 		vols = append(vols, &volume.Volume{Name: v})
 	}
 
-	return volume.Response{Volumes: vols, Err: ""}
+	return &volume.ListResponse{Volumes: vols}, nil
 }
 
-func (rd *RbdDriver) Get(req volume.Request) volume.Response {
+func (rd *RbdDriver) Get(req *volume.GetRequest) (*volume.GetResponse, error) {
 	log.WithField("Request", req).Debug("Get")
 
 	image := rd.pool + "/" + req.Name
@@ -166,9 +164,8 @@ func (rd *RbdDriver) Get(req volume.Request) volume.Response {
 	img, err := LoadRbdImage(image)
 	if err != nil {
 		log.Errorf(err.Error())
-		msg := fmt.Sprintf("Error while loading image %v.", image)
-		log.Errorf(msg)
-		return volume.Response{Volume: nil, Err: msg}
+		msg := fmt.Errorf("Error while loading image %v.", image)
+		return nil, msg
 	}
 
 	vol := &volume.Volume{Name: img.ShortName()}
@@ -181,10 +178,10 @@ func (rd *RbdDriver) Get(req volume.Request) volume.Response {
 		}
 	}
 
-	return volume.Response{Volume: vol, Err: ""}
+	return &volume.GetResponse{Volume: vol}, nil
 }
 
-func (rd *RbdDriver) Remove(req volume.Request) volume.Response {
+func (rd *RbdDriver) Remove(req *volume.RemoveRequest) error {
 	log.WithField("Request", req).Debug("Remove")
 
 	image := rd.pool + "/" + req.Name
@@ -192,23 +189,21 @@ func (rd *RbdDriver) Remove(req volume.Request) volume.Response {
 	img, err := LoadRbdImage(image)
 	if err != nil {
 		log.Errorf(err.Error())
-		msg := fmt.Sprintf("Error loading image %v.", req.Name)
-		log.Errorf(msg)
-		return volume.Response{Volume: nil, Err: msg}
+		msg := fmt.Errorf("Error loading image %v.", req.Name)
+		return msg
 	}
 
 	err = img.Remove()
 	if err != nil {
 		log.Errorf(err.Error())
-		msg := fmt.Sprintf("Error occurred while removing the image %v.", image)
-		log.Errorf(msg)
-		return volume.Response{Err: msg}
+		msg := fmt.Errorf("Error occurred while removing the image %v.", image)
+		return msg
 	}
 
-	return volume.Response{Err: ""}
+	return nil
 }
 
-func (rd *RbdDriver) Path(req volume.Request) volume.Response {
+func (rd *RbdDriver) Path(req *volume.PathRequest) (*volume.PathResponse, error) {
 	log.WithField("Request", req).Debug("Path")
 
 	image := rd.pool + "/" + req.Name
@@ -216,47 +211,43 @@ func (rd *RbdDriver) Path(req volume.Request) volume.Response {
 	img, err := LoadRbdImage(image)
 	if err != nil {
 		log.Errorf(err.Error())
-		msg := fmt.Sprintf("Error loading image %v.", req.Name)
-		log.Errorf(msg)
-		return volume.Response{Volume: nil, Err: msg}
+		msg := fmt.Errorf("Error loading image %v.", req.Name)
+		return nil, msg
 	}
 
 	b, err := img.IsMapped()
 	if err != nil {
 		log.Errorf(err.Error())
-		msg := fmt.Sprintf("Error trying to determine if image %v is mapped.", image)
-		log.Errorf(msg)
-		return volume.Response{Err: msg}
+		msg := fmt.Errorf("Error trying to determine if image %v is mapped.", image)
+		return nil, msg
 	}
 
 	if !b {
-		return volume.Response{Err: fmt.Sprintf("Image %v is not mapped to a device.", image)}
+		return nil, fmt.Errorf("Image %v is not mapped to a device.", image)
 	}
 
 	b, err = img.IsMounted()
 	if err != nil {
 		log.Errorf(err.Error())
-		msg := fmt.Sprintf("Error trying to determine if image %v is mounted.", image)
-		log.Errorf(msg)
-		return volume.Response{Err: msg}
+		msg := fmt.Errorf("Error trying to determine if image %v is mounted.", image)
+		return nil, msg
 	}
 
 	if !b {
-		return volume.Response{Err: fmt.Sprintf("Image %v is mapped, but not mounted.", image)}
+		return nil, fmt.Errorf("Image %v is mapped, but not mounted.", image)
 	}
 
 	mp, err := img.GetMountPoint()
 	if err != nil {
 		log.Errorf(err.Error())
-		msg := fmt.Sprintf("Error trying to get the mount point of image %v.", image)
-		log.Errorf(msg)
-		return volume.Response{Err: msg}
+		msg := fmt.Errorf("Error trying to get the mount point of image %v.", image)
+		return nil, msg
 	}
 
-	return volume.Response{Mountpoint: mp, Err: ""}
+	return &volume.PathResponse{Mountpoint: mp}, nil
 }
 
-func (rd *RbdDriver) Mount(req volume.MountRequest) volume.Response {
+func (rd *RbdDriver) Mount(req *volume.MountRequest) (*volume.MountResponse, error) {
 	log.WithField("Request", req).Debug("Mount")
 	var err error
 	var img *rbdImage
@@ -271,26 +262,24 @@ func (rd *RbdDriver) Mount(req volume.MountRequest) volume.Response {
 		img, err = LoadRbdImage(image)
 		if err != nil {
 			log.Errorf(err.Error())
-			msg := fmt.Sprintf("Error loading image %v.", image)
-			log.Errorf(msg)
-			return volume.Response{Err: msg}
+			msg := fmt.Errorf("Error loading image %v.", image)
+			return nil, msg
 		}
 	}
 
 	mp, err := img.Mount(req.ID)
 	if err != nil {
 		log.Errorf(err.Error())
-		msg := fmt.Sprintf("Error while mounting image %v.", image)
-		log.Errorf(msg)
-		return volume.Response{Err: msg}
+		msg := fmt.Errorf("Error while mounting image %v.", image)
+		return nil, msg
 	}
 
 	rd.mounts[image] = img
 
-	return volume.Response{Mountpoint: mp, Err: ""}
+	return &volume.MountResponse{Mountpoint: mp}, nil
 }
 
-func (rd *RbdDriver) Unmount(req volume.UnmountRequest) volume.Response {
+func (rd *RbdDriver) Unmount(req *volume.UnmountRequest) error {
 	log.WithField("Request", req).Debug("Unmount")
 
 	image := rd.pool + "/" + req.Name
@@ -299,9 +288,8 @@ func (rd *RbdDriver) Unmount(req volume.UnmountRequest) volume.Response {
 	defer rd.mutex.Unlock()
 	img, ok := rd.mounts[image]
 	if !ok {
-		msg := fmt.Sprintf("Could not find image object for %v in %v.", image, rd.mounts)
-		log.Errorf(msg)
-		return volume.Response{Err: msg}
+		msg := fmt.Errorf("Could not find image object for %v in %v.", image, rd.mounts)
+		return msg
 	}
 
 	rd.unmountWg.Add(1)
@@ -309,15 +297,14 @@ func (rd *RbdDriver) Unmount(req volume.UnmountRequest) volume.Response {
 	err := img.Unmount(req.ID)
 	if err != nil {
 		log.Errorf(err.Error())
-		msg := fmt.Sprintf("Error unmounting image %v.", image)
-		log.Errorf(msg)
-		return volume.Response{Err: msg}
+		msg := fmt.Errorf("Error unmounting image %v.", image)
+		return msg
 	}
 
-	return volume.Response{Err: ""}
+	return nil
 }
 
-func (rd *RbdDriver) Capabilities(req volume.Request) volume.Response {
-	log.WithField("Request", req).Debug("Capabilites")
-	return volume.Response{Capabilities: volume.Capability{Scope: "global"}}
+func (rd *RbdDriver) Capabilities() *volume.CapabilitiesResponse {
+	log.Debug("Capabilites")
+	return &volume.CapabilitiesResponse{Capabilities: volume.Capability{Scope: "global"}}
 }
