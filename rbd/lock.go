@@ -69,7 +69,7 @@ func (rl *RbdLock) addLock(expires time.Time) (string, error) {
 	lid := rl.hostname + "," + expires.Format(time.RFC3339Nano)
 	tag := rl.hostname + DrpLockTagSuffix
 
-	err := exec.Command("rbd", "lock", "add", "--shared", tag, rl.img.image, lid).Run() //nolint: gas
+	err := exec.Command(DrpRbdBinPath, "lock", "add", "--shared", tag, rl.img.image, lid).Run() //nolint: gas
 	if err != nil {
 		log.Errorf(err.Error())
 		return "", fmt.Errorf("failed to add lock to image %v", rl.img.image)

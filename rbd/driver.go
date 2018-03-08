@@ -17,6 +17,8 @@ const (
 	DrpRefreshPercent = 50
 	//DrpDockerContainerDir is the default docker storage dir for container jsons
 	DrpDockerContainerDir = "/var/lib/docker/containers"
+	//DrpRbdBinPath is the default path of the rbd program
+	DrpRbdBinPath = "/usr/bin/rbd"
 )
 
 var (
@@ -53,7 +55,7 @@ func NewRbdDriver(pool, ds string) (*RbdDriver, error) {
 	}
 	log.WithField("Current Mappings", mappings).Debug("currently mapped images")
 
-	var used map[string][]*container
+	var used map[string][]*Container
 	used, err = GetImagesInUse(pool)
 	if err != nil {
 		log.WithError(err).Error("error getting images in use")
@@ -80,7 +82,7 @@ func NewRbdDriver(pool, ds string) (*RbdDriver, error) {
 			log.Error("found a local map that is locked by someone else! running emergency unmap")
 			containers := used[image]
 			for _, c := range containers {
-				err = img.EmergencyUnmap(c.containerid)
+				err = img.EmergencyUnmap(c.ID)
 				if err != nil {
 					log.WithError(err).WithField("image", image).Error("error while doing an emergency unmap. I hope your data is not corrupted")
 				}
@@ -115,7 +117,7 @@ func NewRbdDriver(pool, ds string) (*RbdDriver, error) {
 		}
 
 		for _, c := range containers {
-			img.users.add(c.mountid)
+			img.users.add(c.MountID)
 		}
 
 		mnts[img.image] = img

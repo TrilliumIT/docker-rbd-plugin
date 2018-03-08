@@ -12,22 +12,31 @@ import (
 	log "github.com/Sirupsen/logrus"
 )
 
-type mount struct {
-	Device     string
+//Mount represents a kernel mount
+type Mount struct {
+	//Device is the mount's device
+	Device string
+	//MountPoint is the path
 	MountPoint string
-	FSType     string
-	Options    string
-	Dump       bool
-	FsckOrder  int
+	//FSType is the filesystem type
+	FSType string
+	//Options is a string representing the mount's options
+	Options string
+	//Dump is that first number that no one uses
+	Dump bool
+	//FsckOrder is the second one
+	FsckOrder int
 }
 
-type container struct {
-	containerid string
-	mountid     string
+//Container represents a container using an rbd device, with it's mountid
+type Container struct {
+	ID      string
+	MountID string
 }
 
-func GetMounts() (map[string]*mount, error) {
-	mounts := make(map[string]*mount)
+//GetMounts returns all kernel mounts
+func GetMounts() (map[string]*Mount, error) {
+	mounts := make(map[string]*Mount)
 
 	mf := os.Getenv("DRP_MOUNTS_FILE")
 	if mf == "" {
@@ -37,7 +46,7 @@ func GetMounts() (map[string]*mount, error) {
 	bytes, err := ioutil.ReadFile(mf)
 	if err != nil {
 		log.Errorf(err.Error())
-		return nil, fmt.Errorf("Failed to read mounts file at %v.", mf)
+		return nil, fmt.Errorf("failed to read mounts file at %v", mf)
 	}
 
 	lines := strings.Split(string(bytes), "\n")
@@ -45,16 +54,18 @@ func GetMounts() (map[string]*mount, error) {
 		if strings.TrimSpace(line) != "" {
 			attrs := strings.Split(line, " ")
 
-			dump, err := strconv.Atoi(attrs[4])
+			var dump int
+			dump, err = strconv.Atoi(attrs[4])
 			if err != nil {
 				dump = 0
 			}
-			fo, err := strconv.Atoi(attrs[5])
+			var fo int
+			fo, err = strconv.Atoi(attrs[5])
 			if err != nil {
 				fo = 0
 			}
 
-			mounts[attrs[0]] = &mount{
+			mounts[attrs[0]] = &Mount{
 				Device:     attrs[0],
 				MountPoint: attrs[1],
 				FSType:     attrs[2],
@@ -68,18 +79,19 @@ func GetMounts() (map[string]*mount, error) {
 	return mounts, nil
 }
 
+//GetMappings returns all rbd mappings
 func GetMappings(pool string) (map[string]map[string]string, error) {
-	bytes, err := exec.Command("rbd", "showmapped", "--format", "json").Output()
+	bytes, err := exec.Command(DrpRbdBinPath, "showmapped", "--format", "json").Output() //nolint: gas
 	if err != nil {
 		log.Errorf(err.Error())
-		return nil, fmt.Errorf("Failed to execute the `rbd showmapped` command.")
+		return nil, fmt.Errorf("failed to execute the `rbd showmapped` command")
 	}
 
 	var mappings map[string]map[string]string
 	err = json.Unmarshal(bytes, &mappings)
 	if err != nil {
 		log.Errorf(err.Error())
-		return nil, fmt.Errorf("Failed to unmarshal json: %v", string(bytes))
+		return nil, fmt.Errorf("failed to unmarshal json: %v", string(bytes))
 	}
 
 	mymappings := make(map[string]map[string]string)
@@ -92,30 +104,32 @@ func GetMappings(pool string) (map[string]map[string]string, error) {
 	return mymappings, nil
 }
 
+//GetImages lists all ceph rbds in our pool
 func GetImages(pool string) ([]string, error) {
-	bytes, err := exec.Command("rbd", "list", "--format", "json", pool).Output()
+	bytes, err := exec.Command(DrpRbdBinPath, "list", "--format", "json", pool).Output() //nolint: gas
 	if err != nil {
 		log.Errorf(err.Error())
-		return nil, fmt.Errorf("Failed to list images in pool %v.", pool)
+		return nil, fmt.Errorf("failed to list images in pool %v", pool)
 	}
 
 	var images []string
 	err = json.Unmarshal(bytes, &images)
 	if err != nil {
 		log.Errorf(err.Error())
-		return nil, fmt.Errorf("Failed to unmarshal json: %v", string(bytes))
+		return nil, fmt.Errorf("failed to unmarshal json: %v", string(bytes))
 	}
 
 	return images, nil
 }
 
+//ImageExists returns true if image already exists
 func ImageExists(image string) (bool, error) {
 	pool := strings.Split(image, "/")[0]
 
 	images, err := GetImages(pool)
 	if err != nil {
 		log.Errorf(err.Error())
-		return false, fmt.Errorf("Failed to get image list for pool %v.", pool)
+		return false, fmt.Errorf("failed to get image list for pool %v", pool)
 	}
 
 	for _, img := range images {
@@ -127,22 +141,24 @@ func ImageExists(image string) (bool, error) {
 	return false, nil
 }
 
+//PoolExists returns true if our pool exists
 func PoolExists(pool string) (bool, error) {
-	err := exec.Command("rbd", "list", pool).Run()
+	err := exec.Command(DrpRbdBinPath, "list", pool).Run() //nolint: gas
 	if err != nil {
 		log.Errorf(err.Error())
-		return false, fmt.Errorf("Error trying to access pool %v. Does it exist?", pool)
+		return false, fmt.Errorf("error trying to access pool %v. Does it exist?", pool)
 	}
 
 	return true, nil
 }
 
-func GetImagesInUse(pool string) (map[string][]*container, error) {
-	images := make(map[string][]*container)
+//GetImagesInUse returns images in use by containers in the container json files
+func GetImagesInUse(pool string) (map[string][]*Container, error) {
+	images := make(map[string][]*Container)
 	dirs, err := ioutil.ReadDir(DrpDockerContainerDir)
 	if err != nil {
 		log.Error(err.Error())
-		return images, fmt.Errorf("Error reading container directory %v.", DrpDockerContainerDir)
+		return images, fmt.Errorf("error reading container directory %v", DrpDockerContainerDir)
 	}
 
 	for _, d := range dirs {
@@ -150,16 +166,17 @@ func GetImagesInUse(pool string) (map[string][]*container, error) {
 			continue
 		}
 
-		bytes, err := ioutil.ReadFile(DrpDockerContainerDir + "/" + d.Name() + "/config.v2.json")
+		var bytes []byte
+		bytes, err = ioutil.ReadFile(DrpDockerContainerDir + "/" + d.Name() + "/config.v2.json")
 		if err != nil {
-			log.WithError(err).WithField("container", d.Name()).Warning("Error reading config.v2.json for container.")
+			log.WithError(err).WithField("container", d.Name()).Warning("error reading config.v2.json for container")
 			continue
 		}
 
 		var config map[string]interface{}
 		err = json.Unmarshal(bytes, &config)
 		if err != nil {
-			log.WithError(err).WithField("container", d.Name()).Warning("Error during unmarshal of config json.")
+			log.WithError(err).WithField("container", d.Name()).Warning("error during unmarshal of config json")
 			continue
 		}
 
@@ -172,7 +189,7 @@ func GetImagesInUse(pool string) (map[string][]*container, error) {
 		for _, v := range mps {
 			m := v.(map[string]interface{})
 			if m["Driver"].(string) == "rbd" {
-				images[pool+"/"+m["Name"].(string)] = append(images[pool+"/"+m["Name"].(string)], &container{containerid: d.Name(), mountid: m["ID"].(string)})
+				images[pool+"/"+m["Name"].(string)] = append(images[pool+"/"+m["Name"].(string)], &Container{ID: d.Name(), MountID: m["ID"].(string)})
 			}
 		}
 	}

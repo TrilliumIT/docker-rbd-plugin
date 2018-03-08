@@ -49,7 +49,7 @@ func CreateRbdImage(image, size, fs string) (*RbdImage, error) {
 	}
 
 	log.Debugf("executing: rbd create %v --size %v", image, size)
-	err = exec.Command("rbd", "create", image, "--size", size).Run() //nolint: gas
+	err = exec.Command(DrpRbdBinPath, "create", image, "--size", size).Run() //nolint: gas
 	if err != nil {
 		log.Errorf(err.Error())
 		return nil, fmt.Errorf("error trying to create the image %v", image)
@@ -57,7 +57,7 @@ func CreateRbdImage(image, size, fs string) (*RbdImage, error) {
 	defer func() {
 		if err != nil {
 			log.Errorf("detected error after creating image %v, removing")
-			_ = exec.Command("rbd", "remove", image).Run() //nolint: gas
+			_ = exec.Command(DrpRbdBinPath, "remove", image).Run() //nolint: gas
 		}
 	}()
 
@@ -252,7 +252,7 @@ func (img *RbdImage) mapDevice() (string, error) {
 		}
 	}()
 
-	out, err := exec.Command("rbd", "map", img.image).Output() //nolint: gas
+	out, err := exec.Command(DrpRbdBinPath, "map", img.image).Output() //nolint: gas
 	if err != nil {
 		log.Errorf(err.Error())
 		return "", fmt.Errorf("failed to map the image %v", img.image)
@@ -279,7 +279,7 @@ func (img *RbdImage) unmapDevice() error {
 	}
 
 	if b {
-		err = exec.Command("rbd", "unmap", img.image).Run() //nolint: gas
+		err = exec.Command(DrpRbdBinPath, "unmap", img.image).Run() //nolint: gas
 		if err != nil {
 			log.Errorf(err.Error())
 
@@ -331,7 +331,7 @@ func (img *RbdImage) Remove() error {
 		return fmt.Errorf("cannot remove image %v because it is currently locked", img.image)
 	}
 
-	err = exec.Command("rbd", "remove", img.image).Run() //nolint: gas
+	err = exec.Command(DrpRbdBinPath, "remove", img.image).Run() //nolint: gas
 	if err != nil {
 		log.Errorf("error while trying to remove image %v", img.image)
 		return err
@@ -511,7 +511,7 @@ func (img *RbdImage) Unmount(mountid string) error {
 
 //GetAllLocks returns all the locks for this image
 func (img *RbdImage) GetAllLocks() (map[string]map[string]string, error) {
-	bytes, err := exec.Command("rbd", "lock", "list", "--format", "json", img.image).Output() //nolint: gas
+	bytes, err := exec.Command(DrpRbdBinPath, "lock", "list", "--format", "json", img.image).Output() //nolint: gas
 	if err != nil {
 		log.Errorf(err.Error())
 		return nil, fmt.Errorf("failed to get locks for image %v", img.image)
@@ -619,7 +619,7 @@ func (img *RbdImage) EmergencyUnmap(containerid string) error {
 	}
 
 	log.Infof("attempting unmap of image %v", img.image)
-	err = exec.Command("rbd", "unmap", img.image).Run() //nolint: gas
+	err = exec.Command(DrpRbdBinPath, "unmap", img.image).Run() //nolint: gas
 	if err != nil {
 		log.Errorf(err.Error())
 		return fmt.Errorf("error while trying to unmap the image %v", img.image)
@@ -664,7 +664,7 @@ func (img *RbdImage) reapLocks() error {
 }
 
 func (img *RbdImage) removeLock(id, locker string) error {
-	err := exec.Command("rbd", "lock", "rm", img.image, id, locker).Run() //nolint: gas
+	err := exec.Command(DrpRbdBinPath, "lock", "rm", img.image, id, locker).Run() //nolint: gas
 	if err != nil {
 		log.Errorf(err.Error())
 		return fmt.Errorf("error removing lock from image %v with id %v", img.image, id)
