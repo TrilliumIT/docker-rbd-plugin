@@ -90,7 +90,8 @@ func NewRbdDriver(pool, ds string) (*RbdDriver, error) {
 			continue
 		}
 
-		exp, err := img.GetCephLockExpiration()
+		var exp time.Time
+		exp, err = img.GetCephLockExpiration()
 		if err != nil {
 			log.WithError(err).WithField("image", img.image).Warning("error getting lock expiration")
 			exp = time.Now()
