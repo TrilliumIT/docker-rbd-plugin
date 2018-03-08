@@ -139,10 +139,10 @@ func PoolExists(pool string) (bool, error) {
 
 func GetImagesInUse(pool string) (map[string][]*container, error) {
 	images := make(map[string][]*container)
-	dirs, err := ioutil.ReadDir(DRP_DOCKER_CONTAINER_DIR)
+	dirs, err := ioutil.ReadDir(DrpDockerContainerDir)
 	if err != nil {
 		log.Error(err.Error())
-		return images, fmt.Errorf("Error reading container directory %v.", DRP_DOCKER_CONTAINER_DIR)
+		return images, fmt.Errorf("Error reading container directory %v.", DrpDockerContainerDir)
 	}
 
 	for _, d := range dirs {
@@ -150,7 +150,7 @@ func GetImagesInUse(pool string) (map[string][]*container, error) {
 			continue
 		}
 
-		bytes, err := ioutil.ReadFile(DRP_DOCKER_CONTAINER_DIR + "/" + d.Name() + "/config.v2.json")
+		bytes, err := ioutil.ReadFile(DrpDockerContainerDir + "/" + d.Name() + "/config.v2.json")
 		if err != nil {
 			log.WithError(err).WithField("container", d.Name()).Warning("Error reading config.v2.json for container.")
 			continue

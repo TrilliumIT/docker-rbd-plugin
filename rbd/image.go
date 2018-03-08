@@ -196,7 +196,7 @@ func (img *rbdImage) mapDevice() (string, error) {
 		return "", fmt.Errorf("Cannot map a locked image.")
 	}
 
-	refresh := DRP_DEFAULT_LOCK_REFRESH
+	refresh := DrpDefaultLockRefresh
 	srefresh := os.Getenv("DRP_LOCK_REFRESH")
 	if srefresh != "" {
 		refresh, err = strconv.Atoi(srefresh)

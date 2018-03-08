@@ -37,7 +37,7 @@ func AcquireLock(img *rbdImage, expireSeconds int) (*rbdLock, error) {
 
 func InheritLock(img *rbdImage, expireSeconds int) (*rbdLock, error) {
 	expiresIn := time.Duration(expireSeconds) * time.Second
-	refresh := time.Duration(int(float32(expireSeconds)*(DRP_REFRESH_PERCENT/100.0))) * time.Second
+	refresh := time.Duration(int(float32(expireSeconds)*(DrpRefreshPercent/100.0))) * time.Second
 
 	hn, err := os.Hostname()
 	if err != nil {
@@ -78,7 +78,7 @@ func (rl *rbdLock) refreshLock(expiresIn time.Duration) error {
 	exp := time.Now().Add(expiresIn)
 
 	if expiresIn.Seconds() == 0 {
-		exp = DRP_END_OF_TIME
+		exp = DrpEndOfTime
 	}
 
 	lid, err := rl.addLock(exp)
