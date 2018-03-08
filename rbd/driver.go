@@ -29,7 +29,7 @@ type RbdDriver struct {
 	volume.Driver
 	defaultSize string
 	pool        string
-	mounts      map[string]*rbdImage
+	mounts      map[string]*RbdImage
 	mutex       sync.Mutex
 	unmountWg   sync.WaitGroup
 }
@@ -44,7 +44,7 @@ func NewRbdDriver(pool, ds string) (*RbdDriver, error) {
 	log.SetLevel(log.DebugLevel)
 	log.Debug("Creating new RbdDriver.")
 
-	mnts := make(map[string]*rbdImage)
+	mnts := make(map[string]*RbdImage)
 
 	mappings, err := GetMappings(pool)
 	if err != nil {
@@ -60,7 +60,7 @@ func NewRbdDriver(pool, ds string) (*RbdDriver, error) {
 	}
 	log.WithField("Used Images", used).Debug("images detected in use")
 
-	var img *rbdImage
+	var img *RbdImage
 	for _, m := range mappings {
 		image := m["pool"] + "/" + m["name"]
 		img, err = LoadRbdImage(image)
@@ -272,7 +272,7 @@ func (rd *RbdDriver) Path(req *volume.PathRequest) (*volume.PathResponse, error)
 func (rd *RbdDriver) Mount(req *volume.MountRequest) (*volume.MountResponse, error) {
 	log.WithField("request", req).Debug("mount")
 	var err error
-	var img *rbdImage
+	var img *RbdImage
 
 	rd.mutex.Lock()
 	defer rd.mutex.Unlock()

@@ -16,12 +16,12 @@ const (
 
 type rbdLock struct {
 	hostname string
-	img      *rbdImage
+	img      *RbdImage
 	ticker   *time.Ticker
 	open     chan struct{}
 }
 
-func AcquireLock(img *rbdImage, expireSeconds int) (*rbdLock, error) {
+func AcquireLock(img *RbdImage, expireSeconds int) (*rbdLock, error) {
 	b, err := img.IsLocked()
 	if err != nil {
 		log.Errorf(err.Error())
@@ -35,7 +35,7 @@ func AcquireLock(img *rbdImage, expireSeconds int) (*rbdLock, error) {
 	return InheritLock(img, expireSeconds)
 }
 
-func InheritLock(img *rbdImage, expireSeconds int) (*rbdLock, error) {
+func InheritLock(img *RbdImage, expireSeconds int) (*rbdLock, error) {
 	expiresIn := time.Duration(expireSeconds) * time.Second
 	refresh := time.Duration(int(float32(expireSeconds)*(DrpRefreshPercent/100.0))) * time.Second
 
