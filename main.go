@@ -56,13 +56,13 @@ func Run(ctx *cli.Context) {
 	}
 
 	if u.Uid != "0" {
-		fmt.Println("Docker RBD Plugin requires root priveleges.")
+		fmt.Println("Docker RBD Plugin requires root privileges.")
 		os.Exit(1)
 	}
 
 	b, err := rbddriver.PoolExists(ctx.String("pool"))
 	if err != nil {
-		fmt.Printf(err.Error())
+		fmt.Println(err.Error())
 		os.Exit(1)
 	}
 
@@ -72,7 +72,7 @@ func Run(ctx *cli.Context) {
 
 	d, err := rbddriver.NewRbdDriver(ctx.String("pool"), ctx.String("default-size"))
 	if err != nil {
-		fmt.Printf(err.Error())
+		fmt.Println(err.Error())
 		os.Exit(1)
 	}
 
@@ -88,6 +88,8 @@ func Run(ctx *cli.Context) {
 
 	log.Debug("Launching volume handler.")
 	h := volume.NewHandler(d)
-	h.ServeUnix("rbd", 0)
-
+	err = h.ServeUnix("rbd", 0)
+	if err != nil {
+		log.WithError(err).Error("error while stopping driver")
+	}
 }
