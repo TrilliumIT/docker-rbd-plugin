@@ -1,7 +1,6 @@
 package rbddriver
 
 import (
-	"fmt"
 	"sync"
 )
 
@@ -37,7 +36,7 @@ func (u *rbdUsers) len() int {
 func (u *rbdUsers) reconcile(image string) error {
 	conts, err := GetContainersUsingImage(image)
 	if err != nil {
-		return fmt.Errorf("failed to get image users")
+		return err
 	}
 
 	u.clear()

@@ -197,6 +197,7 @@ func GetImagesInUse(pool string) (map[string][]*Container, error) {
 	return images, nil
 }
 
+//GetContainersUsingImage returns all containers using passed in image
 func GetContainersUsingImage(image string) ([]*Container, error) {
 	pool := strings.Split(image, "/")[0]
 	images, err := GetImagesInUse(pool)
