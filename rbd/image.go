@@ -16,7 +16,7 @@ import (
 //RbdImage represents a ceph rbd
 type RbdImage struct {
 	image      string
-	activeLock *rbdLock
+	activeLock *RbdLock
 	users      *rbdUsers
 }
 
