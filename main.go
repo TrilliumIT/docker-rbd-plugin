@@ -18,6 +18,7 @@ const (
 )
 
 func main() {
+	fmt.Printf("Starting docker-rbd-plugin version: %v\n", version)
 
 	var flagPool = cli.StringFlag{
 		Name:  "pool",
