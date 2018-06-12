@@ -86,7 +86,7 @@ func (rl *RbdLock) refreshLock(expiresIn time.Duration) error {
 
 	if rl.img.users.len() == 0 {
 		log.Warnf("No users using the image %v. Releasing lock", rl.img.image)
-		return rl.release()
+		return rl.img.Unmount("")
 	}
 
 	exp := time.Now().Add(expiresIn)
