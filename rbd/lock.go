@@ -79,6 +79,16 @@ func (rl *RbdLock) addLock(expires time.Time) (string, error) {
 }
 
 func (rl *RbdLock) refreshLock(expiresIn time.Duration) error {
+	err := rl.img.users.reconcile(rl.img.image)
+	if err != nil {
+		log.WithError(err).WithField("image", rl.img.image).Error("failed to reconcile image users")
+	}
+
+	if rl.img.users.len() == 0 {
+		log.Warnf("No users using the image %v. Releasing lock", rl.img.image)
+		return rl.release()
+	}
+
 	exp := time.Now().Add(expiresIn)
 
 	if expiresIn.Seconds() == 0 {
