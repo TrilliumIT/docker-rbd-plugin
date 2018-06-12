@@ -166,10 +166,19 @@ func GetImagesInUse(pool string) (map[string][]*Container, error) {
 			continue
 		}
 
+		path := DrpDockerContainerDir + "/" + d.Name() + "/config.v2.json"
+		if _, err = os.Stat(path); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			log.WithError(err).WithField("container", d.Name()).Warning("could not stat config.v2.json for container")
+			continue
+		}
+
 		var bytes []byte
-		bytes, err = ioutil.ReadFile(DrpDockerContainerDir + "/" + d.Name() + "/config.v2.json")
+		bytes, err = ioutil.ReadFile(path)
 		if err != nil {
-			log.WithError(err).WithField("container", d.Name()).Warning("error reading config.v2.json for container")
+			log.WithError(err).WithField("container", d.Name()).Warning("could not reading config.v2.json for container")
 			continue
 		}
 
