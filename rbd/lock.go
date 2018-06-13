@@ -13,6 +13,8 @@ import (
 const (
 	//DrpLockTagSuffix is the suffix for the lock tag
 	DrpLockTagSuffix = "_docker-rbd-plugin"
+	//DrpNoUsrMaxCnt is the maximum number of lock refreshes with no users
+	DrpNoUsrMaxCnt = 3
 )
 
 //RbdLock represents an actively refreshed ceph lock on a ceph rbd
@@ -21,6 +23,7 @@ type RbdLock struct {
 	img      *RbdImage
 	ticker   *time.Ticker
 	open     chan struct{}
+	noUsrCnt int
 }
 
 //AcquireLock locks the rbd, and starts a goroutine to maintain the lock
@@ -54,7 +57,7 @@ func InheritLock(img *RbdImage, expireSeconds int) (*RbdLock, error) {
 		ti = time.NewTicker(refresh)
 	}
 
-	rl := &RbdLock{hostname: hn, img: img, ticker: ti, open: make(chan struct{})}
+	rl := &RbdLock{hostname: hn, img: img, ticker: ti, open: make(chan struct{}), noUsrCnt: 0}
 	err = rl.img.reapLocks()
 	if err != nil {
 		log.Errorf(err.Error())
@@ -84,9 +87,16 @@ func (rl *RbdLock) refreshLock(expiresIn time.Duration) error {
 		log.WithError(err).WithField("image", rl.img.image).Error("failed to reconcile image users")
 	}
 
+	if rl.noUsrCnt > 0 && rl.img.users.len() > 0 {
+		rl.noUsrCnt = 0
+	}
+
 	if rl.img.users.len() == 0 {
-		log.Warnf("No users using the image %v. Releasing lock", rl.img.image)
-		return rl.img.Unmount("")
+		if rl.noUsrCnt > DrpNoUsrMaxCnt {
+			log.Warnf("No users using the image %v. Releasing lock", rl.img.image)
+			return rl.img.Unmount("")
+		}
+		rl.noUsrCnt++
 	}
 
 	exp := time.Now().Add(expiresIn)
@@ -158,7 +168,7 @@ func (rl *RbdLock) release() error {
 func (rl *RbdLock) refreshLoop(expiresIn time.Duration) {
 	err := rl.refreshLock(expiresIn)
 	if err != nil {
-		log.WithError(err).WithField("image", rl.img.image).Error("error while creating a initial lock on image")
+		log.WithError(err).WithField("image", rl.img.image).Error("error while creating an initial lock on image")
 		return
 	}
 
