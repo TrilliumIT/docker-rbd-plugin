@@ -7,7 +7,7 @@ import (
 	"os/user"
 	"syscall"
 
-	log "github.com/Sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
 	"github.com/TrilliumIT/docker-rbd-plugin/rbd"
 	"github.com/docker/go-plugins-helpers/volume"
 	"github.com/urfave/cli"

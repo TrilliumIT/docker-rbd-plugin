@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	log "github.com/Sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
 )
 
 //RbdImage represents a ceph rbd
@@ -56,7 +56,7 @@ func CreateRbdImage(image, size, fs string) (*RbdImage, error) {
 	}
 	defer func() {
 		if err != nil {
-			log.Errorf("detected error after creating image %v, removing")
+			log.Errorf("detected error after creating image %v, removing", image)
 			_ = exec.Command(DrpRbdBinPath, "remove", image).Run() //nolint: gas
 		}
 	}()
@@ -591,7 +591,7 @@ func (img *RbdImage) EmergencyUnmap(containerid string) error {
 	}
 
 	if containerid != "" {
-		log.Info("killing container with id %v", containerid)
+		log.Infof("killing container with id %v", containerid)
 		err = exec.Command("docker", "kill", containerid).Run() //nolint: gas
 		if err != nil {
 			log.WithError(err).Warningf("error killing container %v", containerid)
