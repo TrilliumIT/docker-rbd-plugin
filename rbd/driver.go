@@ -202,6 +202,7 @@ func (rd *RbdDriver) Mount(req *volume.MountRequest) (*volume.MountResponse, err
 			log.WithError(err).Error("error mapping")
 			return nil, fmt.Errorf("error mapping %v: %w", name, err)
 		}
+		mp, err = rbd.Mount(mp)
 	}
 	if err != nil {
 		log.WithError(err).Error("error mounting")
