@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"sync"
-	"time"
 
 	"github.com/docker/go-plugins-helpers/volume"
 	log "github.com/sirupsen/logrus"
@@ -15,11 +14,6 @@ const (
 	DrpDockerContainerDir = "/var/lib/docker/containers"
 	//DrpRbdBinPath is the default path of the rbd program
 	DrpRbdBinPath = "/usr/bin/rbd"
-)
-
-var (
-	//DrpEndOfTime is the furthest away representation possible in a time.Time
-	DrpEndOfTime = time.Unix(1<<63-62135596801, 999999999)
 )
 
 //RbdDriver implements volume.Driver
