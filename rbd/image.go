@@ -13,7 +13,6 @@ import (
 //RbdImage represents a ceph rbd
 type RbdImage struct {
 	image string
-	users *rbdUsers
 }
 
 //LoadRbdImage loads an existing rbd image from ceph and returns it
@@ -28,7 +27,7 @@ func LoadRbdImage(image string) (*RbdImage, error) {
 		return nil, fmt.Errorf("image %v does not exists, cannot load", image)
 	}
 
-	return &RbdImage{image: image, users: &rbdUsers{users: make(map[string]struct{})}}, nil
+	return &RbdImage{image: image}, nil
 }
 
 //CreateRbdImage creates a new rbd image in ceph
@@ -310,7 +309,6 @@ func (img *RbdImage) Mount(mountid string) (string, error) {
 			log.Errorf(err.Error())
 			return "", fmt.Errorf("device for image %v is already mounted, failed to get the mountpoint", img.image)
 		}
-		img.users.add(mountid)
 		return mp, nil
 	}
 
@@ -353,26 +351,15 @@ func (img *RbdImage) Mount(mountid string) (string, error) {
 		return mp, fmt.Errorf("error while trying to mount device %v", dev)
 	}
 
-	img.users.add(mountid)
 	return mp, nil
 }
 
 // Unmount refers to a docker unmount request. It SHOULD do more than just the syscall unmount
 // like validate no containers are using it, etc...
 func (img *RbdImage) Unmount(mountid string) error {
-	err := img.users.reconcile(img.image)
-	if err != nil {
-		log.WithError(err).WithField("image", img.image).WithField("mountid", mountid).Error("failed to reconcile image users")
-	}
-	img.users.remove(mountid)
+	// TODO check all namespaces
 
-	if img.users.len() > 0 {
-		log.Debugf("%v users still using the image %v", img.users.len(), img.image)
-		return nil
-	}
-
-	var b bool
-	b, err = img.IsMounted()
+	b, err := img.IsMounted()
 	if err != nil {
 		log.Errorf(err.Error())
 		return fmt.Errorf("error determining if image %v is mounted", img.image)

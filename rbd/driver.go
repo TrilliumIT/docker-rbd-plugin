@@ -67,20 +67,6 @@ func NewRbdDriver(pool, ds string) (*RbdDriver, error) {
 			continue
 		}
 
-		containers, ok := used[img.image]
-		if !ok {
-			log.WithField("image", img.image).Info("unmounting and unmapping unused device")
-			err = img.Unmount("")
-			if err != nil {
-				log.WithField("image", img.image).Warning("error unmounting unused device")
-			}
-			continue
-		}
-
-		for _, c := range containers {
-			img.users.add(c.MountID)
-		}
-
 		mnts[img.image] = img
 	}
 
