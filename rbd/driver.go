@@ -6,15 +6,11 @@ import (
 	"sync"
 	"time"
 
-	log "github.com/sirupsen/logrus"
 	"github.com/docker/go-plugins-helpers/volume"
+	log "github.com/sirupsen/logrus"
 )
 
 const (
-	//DrpDefaultLockRefresh is how often the rbd lock expires
-	DrpDefaultLockRefresh = 60
-	//DrpRefreshPercent is the percentage of refresh time that the lock refreshes
-	DrpRefreshPercent = 50
 	//DrpDockerContainerDir is the default docker storage dir for container jsons
 	DrpDockerContainerDir = "/var/lib/docker/containers"
 	//DrpRbdBinPath is the default path of the rbd program
@@ -71,42 +67,6 @@ func NewRbdDriver(pool, ds string) (*RbdDriver, error) {
 			continue
 		}
 
-		var b bool
-		b, err = img.IsLocked()
-		if err != nil {
-			log.WithError(err).WithField("image", image).Error("error getting lock status of image")
-			continue
-		}
-
-		if b {
-			log.Error("found a local map that is locked by someone else! running emergency unmap")
-			containers := used[image]
-			for _, c := range containers {
-				err = img.EmergencyUnmap(c.ID)
-				if err != nil {
-					log.WithError(err).WithField("image", image).Error("error while doing an emergency unmap. I hope your data is not corrupted")
-				}
-			}
-			continue
-		}
-
-		var exp time.Time
-		exp, err = img.GetCephLockExpiration()
-		if err != nil {
-			log.WithError(err).WithField("image", img.image).Warning("error getting lock expiration")
-			exp = time.Now()
-		}
-
-		expireSeconds := DrpDefaultLockRefresh
-		if exp.Equal(DrpEndOfTime) {
-			expireSeconds = 0
-		}
-
-		img.activeLock, err = InheritLock(img, expireSeconds)
-		if err != nil {
-			//wasn't previously handling the error, so not sure what to do here yet
-			log.WithField("image", img.image).Error("failed to inherit lock")
-		}
 		containers, ok := used[img.image]
 		if !ok {
 			log.WithField("image", img.image).Info("unmounting and unmapping unused device")
