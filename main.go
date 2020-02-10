@@ -7,9 +7,9 @@ import (
 	"os/user"
 	"syscall"
 
-	log "github.com/sirupsen/logrus"
 	"github.com/TrilliumIT/docker-rbd-plugin/rbd"
 	"github.com/docker/go-plugins-helpers/volume"
+	log "github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
 )
 
@@ -32,6 +32,20 @@ func main() {
 		Usage: "Default size when creating an rbd image.",
 	}
 
+	var flagDefaultFS = cli.StringFlag{
+		Name:   "default-filesystem",
+		Value:  "xfs",
+		Usage:  "Default filesystem when creating an rbd image.",
+		EnvVar: "RBD_DEFAULT_FS",
+	}
+
+	var flagDefaultMP = cli.StringFlag{
+		Name:   "mountpoint",
+		Value:  "/var/lib/docker-volumes/rbd",
+		Usage:  "Mountpoint for rbd images.",
+		EnvVar: "RBD_VOLUME_DIR",
+	}
+
 	app := cli.NewApp()
 	app.Name = "docker-rbd-plugin"
 	app.Usage = "Docker RBD Plugin"
@@ -39,6 +53,8 @@ func main() {
 	app.Flags = []cli.Flag{
 		flagPool,
 		flagDefaultSize,
+		flagDefaultFS,
+		flagDefaultMP,
 	}
 	app.Action = Run
 
@@ -61,17 +77,7 @@ func Run(ctx *cli.Context) {
 		os.Exit(1)
 	}
 
-	b, err := rbddriver.PoolExists(ctx.String("pool"))
-	if err != nil {
-		fmt.Println(err.Error())
-		os.Exit(1)
-	}
-
-	if !b {
-		fmt.Printf("The requested ceph pool %v for docker volumes does not exist in the ceph cluster.\n", ctx.String("pool"))
-	}
-
-	d, err := rbddriver.NewRbdDriver(ctx.String("pool"), ctx.String("default-size"))
+	d, err := rbddriver.NewRbdDriver(ctx.String("pool"), ctx.String("default-size"), ctx.String("default-filesystem"), ctx.String("mountpoint"))
 	if err != nil {
 		fmt.Println(err.Error())
 		os.Exit(1)
@@ -83,7 +89,6 @@ func Run(ctx *cli.Context) {
 	signal.Notify(c, syscall.SIGTERM)
 	go func() {
 		<-c
-		d.UnmountWait()
 		os.Exit(0)
 	}()
 

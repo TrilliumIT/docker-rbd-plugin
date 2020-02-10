@@ -6,10 +6,9 @@ import (
 	"io/ioutil"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
-
-	log "github.com/sirupsen/logrus"
 )
 
 //Mount represents a kernel mount
@@ -26,52 +25,80 @@ type Mount struct {
 	Dump bool
 	//FsckOrder is the second one
 	FsckOrder int
+	//Namespace is the namespace the mount is in
+	NameSpace string
 }
 
-//Container represents a container using an rbd device, with it's mountid
-type Container struct {
-	ID      string
-	MountID string
+func getMntNS(pidPath string) (string, error) {
+	nsPath := filepath.Join(pidPath, "ns", "mnt")
+	ns, err := os.Readlink(nsPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to get ns from %v: %w", nsPath, err)
+	}
+	return ns, nil
 }
 
-//GetMounts returns all kernel mounts
-func GetMounts() (map[string]*Mount, error) {
-	mounts := make(map[string]*Mount)
+//GetMounts returns all kernel mounts in this namespace
+func GetMounts(dev string) ([]*Mount, error) {
+	ns, err := getMntNS("/proc/self")
+	if err != nil {
+		return nil, err
+	}
+	return getMountsFromFile("/proc/self/mounts", dev, ns)
+}
 
-	mf := os.Getenv("DRP_MOUNTS_FILE")
-	if mf == "" {
-		mf = "/proc/self/mounts"
+//GetOtherNSMounts returns all kernel mounts in other namespaces
+func GetOtherNSMounts(dev string) ([]*Mount, error) {
+	ns, err := getMntNS("/proc/self")
+	if err != nil {
+		return nil, err
 	}
 
-	bytes, err := ioutil.ReadFile(mf)
+	// Add self ns to the ns map so it gets skipped preemptively
+	namespaces := make(map[string]struct{})
+	namespaces[ns] = struct{}{}
+	mounts := []*Mount{}
+
+	pidDirs, err := filepath.Glob("/proc/[0-9]*")
 	if err != nil {
-		log.Errorf(err.Error())
-		return nil, fmt.Errorf("failed to read mounts file at %v", mf)
+		return nil, fmt.Errorf("failed to read /proc pids: %w", err)
+	}
+
+	var mnts []*Mount
+	var file string
+	for _, pidDir := range pidDirs {
+		ns, err = getMntNS(pidDir)
+		if err != nil {
+			return nil, err
+		}
+		if _, ok := namespaces[ns]; !ok {
+			namespaces[ns] = struct{}{}
+			file = filepath.Join(pidDir, "mounts")
+			mnts, err = getMountsFromFile(file, dev, ns)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get mounts from %v: %w", file, err)
+			}
+			mounts = append(mounts, mnts...)
+		}
+	}
+
+	return mounts, nil
+}
+
+func getMountsFromFile(file, dev, namespace string) ([]*Mount, error) {
+	mounts := []*Mount{}
+	bytes, err := ioutil.ReadFile(file)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read mounts file at %v: %w", file, err)
 	}
 
 	lines := strings.Split(string(bytes), "\n")
 	for _, line := range lines {
 		if strings.TrimSpace(line) != "" {
-			attrs := strings.Split(line, " ")
-
-			var dump int
-			dump, err = strconv.Atoi(attrs[4])
-			if err != nil {
-				dump = 0
-			}
-			var fo int
-			fo, err = strconv.Atoi(attrs[5])
-			if err != nil {
-				fo = 0
-			}
-
-			mounts[attrs[0]] = &Mount{
-				Device:     attrs[0],
-				MountPoint: attrs[1],
-				FSType:     attrs[2],
-				Options:    attrs[3],
-				Dump:       dump == 1,
-				FsckOrder:  fo,
+			mount := parseMount(line)
+			mount.NameSpace = namespace
+			if mount.Device == dev {
+				mounts = append(mounts, mount)
 			}
 		}
 	}
@@ -79,140 +106,64 @@ func GetMounts() (map[string]*Mount, error) {
 	return mounts, nil
 }
 
+func parseMount(line string) *Mount {
+	attrs := strings.Split(line, " ")
+
+	dump, err := strconv.Atoi(attrs[4])
+	if err != nil {
+		dump = 0
+	}
+	var fo int
+	fo, err = strconv.Atoi(attrs[5])
+	if err != nil {
+		fo = 0
+	}
+
+	return &Mount{
+		Device:     attrs[0],
+		MountPoint: attrs[1],
+		FSType:     attrs[2],
+		Options:    attrs[3],
+		Dump:       dump == 1,
+		FsckOrder:  fo,
+	}
+}
+
+type MappedRBD struct {
+	Pool   string `json:"pool"`
+	Name   string `json:"name"`
+	Snap   string `json:"snap"`
+	Device string `json:"device"`
+}
+
 //GetMappings returns all rbd mappings
-func GetMappings(pool string) (map[string]map[string]string, error) {
+func ShowMapped() (map[string]*MappedRBD, error) {
 	bytes, err := exec.Command(DrpRbdBinPath, "showmapped", "--format", "json").Output() //nolint: gas
 	if err != nil {
-		log.Errorf(err.Error())
-		return nil, fmt.Errorf("failed to execute the `rbd showmapped` command")
+		return nil, fmt.Errorf("failed to showmapped: %w", err)
 	}
 
-	var mappings map[string]map[string]string
-	err = json.Unmarshal(bytes, &mappings)
+	var maps map[string]*MappedRBD
+	err = json.Unmarshal(bytes, &maps)
 	if err != nil {
-		log.Errorf(err.Error())
-		return nil, fmt.Errorf("failed to unmarshal json: %v", string(bytes))
+		return nil, fmt.Errorf("failed to unmarshal %v: %w", string(bytes), err)
 	}
 
-	mymappings := make(map[string]map[string]string)
-	for k, v := range mappings {
-		if v["pool"] == pool {
-			mymappings[k] = v
-		}
-	}
-
-	return mymappings, nil
+	return maps, nil
 }
 
 //GetImages lists all ceph rbds in our pool
-func GetImages(pool string) ([]string, error) {
+func ListRBDs(pool string) ([]string, error) {
 	bytes, err := exec.Command(DrpRbdBinPath, "list", "--format", "json", pool).Output() //nolint: gas
 	if err != nil {
-		log.Errorf(err.Error())
-		return nil, fmt.Errorf("failed to list images in pool %v", pool)
+		return nil, fmt.Errorf("failed to list rbds in %v: %w", pool, err)
 	}
 
 	var images []string
 	err = json.Unmarshal(bytes, &images)
 	if err != nil {
-		log.Errorf(err.Error())
-		return nil, fmt.Errorf("failed to unmarshal json: %v", string(bytes))
+		return nil, fmt.Errorf("failed to unmarshal %v. %w", string(bytes), err)
 	}
 
 	return images, nil
-}
-
-//ImageExists returns true if image already exists
-func ImageExists(image string) (bool, error) {
-	pool := strings.Split(image, "/")[0]
-
-	images, err := GetImages(pool)
-	if err != nil {
-		log.Errorf(err.Error())
-		return false, fmt.Errorf("failed to get image list for pool %v", pool)
-	}
-
-	for _, img := range images {
-		if image == pool+"/"+img {
-			return true, nil
-		}
-	}
-
-	return false, nil
-}
-
-//PoolExists returns true if our pool exists
-func PoolExists(pool string) (bool, error) {
-	err := exec.Command(DrpRbdBinPath, "list", pool).Run() //nolint: gas
-	if err != nil {
-		log.Errorf(err.Error())
-		return false, fmt.Errorf("error trying to access pool %v. Does it exist?", pool)
-	}
-
-	return true, nil
-}
-
-//GetImagesInUse returns images in use by containers in the container json files
-func GetImagesInUse(pool string) (map[string][]*Container, error) {
-	images := make(map[string][]*Container)
-	dirs, err := ioutil.ReadDir(DrpDockerContainerDir)
-	if err != nil {
-		log.Error(err.Error())
-		return images, fmt.Errorf("error reading container directory %v", DrpDockerContainerDir)
-	}
-
-	for _, d := range dirs {
-		if !d.IsDir() {
-			continue
-		}
-
-		path := DrpDockerContainerDir + "/" + d.Name() + "/config.v2.json"
-		if _, err = os.Stat(path); err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			log.WithError(err).WithField("container", d.Name()).Warning("could not stat config.v2.json for container")
-			continue
-		}
-
-		var bytes []byte
-		bytes, err = ioutil.ReadFile(path)
-		if err != nil {
-			log.WithError(err).WithField("container", d.Name()).Warning("could not reading config.v2.json for container")
-			continue
-		}
-
-		var config map[string]interface{}
-		err = json.Unmarshal(bytes, &config)
-		if err != nil {
-			log.WithError(err).WithField("container", d.Name()).Warning("error during unmarshal of config json")
-			continue
-		}
-
-		state := config["State"].(map[string]interface{})
-		if !state["Running"].(bool) {
-			continue
-		}
-
-		mps := config["MountPoints"].(map[string]interface{})
-		for _, v := range mps {
-			m := v.(map[string]interface{})
-			if m["Driver"].(string) == "rbd" {
-				images[pool+"/"+m["Name"].(string)] = append(images[pool+"/"+m["Name"].(string)], &Container{ID: d.Name(), MountID: m["ID"].(string)})
-			}
-		}
-	}
-
-	return images, nil
-}
-
-//GetContainersUsingImage returns all containers using passed in image
-func GetContainersUsingImage(image string) ([]*Container, error) {
-	pool := strings.Split(image, "/")[0]
-	images, err := GetImagesInUse(pool)
-	if err != nil {
-		return nil, err
-	}
-
-	return images[image], nil
 }
