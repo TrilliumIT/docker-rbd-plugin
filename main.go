@@ -7,7 +7,6 @@ import (
 	"os/user"
 	"syscall"
 
-	"github.com/TrilliumIT/docker-rbd-plugin/rbd"
 	"github.com/docker/go-plugins-helpers/volume"
 	log "github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
@@ -77,7 +76,7 @@ func Run(ctx *cli.Context) {
 		os.Exit(1)
 	}
 
-	d, err := rbddriver.NewRbdDriver(ctx.String("pool"), ctx.String("default-size"), ctx.String("default-filesystem"), ctx.String("mountpoint"))
+	d, err := NewRbdDriver(ctx.String("pool"), ctx.String("default-size"), ctx.String("default-filesystem"), ctx.String("mountpoint"))
 	if err != nil {
 		fmt.Println(err.Error())
 		os.Exit(1)

@@ -1,4 +1,4 @@
-package rbddriver
+package rbd
 
 import (
 	"encoding/json"
