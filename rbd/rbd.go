@@ -13,11 +13,6 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-const (
-	//DrpRbdBinPath is the default path of the rbd program
-	DrpRbdBinPath = "/usr/bin/rbd"
-)
-
 //RBD represents a ceph rbd
 type RBD struct {
 	Pool     string   `json:"pool"`
@@ -69,8 +64,6 @@ func getRBD(rbdName string, mutex *sync.Mutex) (*RBD, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error unmarshalling %v: %w", rbdName, err)
 	}
-
-	//TODO get mapped info
 
 	return rbd, nil
 }

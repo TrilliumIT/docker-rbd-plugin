@@ -11,6 +11,18 @@ import (
 	"strings"
 )
 
+// DrDrpRbdBinPath is the path to the rbd binary
+var DrpRbdBinPath string
+var fsFreezePath string
+
+func init() {
+	var err error
+	DrpRbdBinPath, err = exec.LookPath("rbd")
+	if err != nil {
+		panic(fmt.Errorf("unable to find rbd binary: %w", err))
+	}
+}
+
 //Mount represents a kernel mount
 type Mount struct {
 	//Device is the mount's device
@@ -128,4 +140,35 @@ func ListRBDs(pool string) ([]string, error) {
 	}
 
 	return images, nil
+}
+
+//FSFreeze freezes a filesystem
+func FSFreeze(mountpoint string) error {
+	return fsFreeze(mountpoint, false)
+}
+
+//FSUnfreeze freezes a filesystem
+func FSUnfreeze(mountpoint string) error {
+	return fsFreeze(mountpoint, true)
+}
+
+func fsFreeze(mountpoint string, unfreeze bool) error {
+	var err error
+	if fsFreezePath == "" {
+		fsFreezePath, err = exec.LookPath("fsfreeze")
+		if err != nil {
+			return err
+		}
+	}
+	op := "freeze"
+	if unfreeze {
+		op = "unfreeze"
+	}
+
+	err = exec.Command(fsFreezePath, "--"+op, mountpoint).Run() //nolint: gas
+	if err != nil {
+		return fmt.Errorf("failed to %v %v: %w", op, mountpoint, err)
+	}
+
+	return nil
 }
