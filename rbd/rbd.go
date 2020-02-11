@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"syscall"
 
 	log "github.com/sirupsen/logrus"
@@ -18,7 +19,11 @@ type RBD struct {
 	Name     string   `json:"name"`
 	Size     int64    `json:"size"`
 	Features []string `json:"features"`
+	mutex    *sync.Mutex
 }
+
+var rbdMutexesMutex = &sync.RWMutex{}
+var rbdMutexes = make(map[string]*sync.Mutex)
 
 // RBDName returns the name in the format pool/name
 func (rbd *RBD) RBDName() string {
@@ -33,21 +38,31 @@ func (rbd *RBD) log() *log.Entry {
 var ErrNoRBD = errors.New("rbd does not exist")
 
 //GetRBD loads an existing rbd image from ceph and returns it
-func GetRBD(image string) (*RBD, error) {
-	bytes, err := exec.Command(DrpRbdBinPath, "info", "--format", "json", image).Output() //nolint: gas
+func GetRBD(rbdName string) (*RBD, error) {
+	mutex := getMutex(rbdName)
+	mutex.Lock()
+	rbd, err := getRBD(rbdName, mutex)
+	if err != nil {
+		mutex.Unlock()
+	}
+	return rbd, err
+}
+
+func getRBD(rbdName string, mutex *sync.Mutex) (*RBD, error) {
+	bytes, err := exec.Command(DrpRbdBinPath, "info", "--format", "json", rbdName).Output() //nolint: gas
 	if err != nil {
 		exitErr, isExitErr := err.(*exec.ExitError)
 		if isExitErr && exitErr.ExitCode() == 2 {
-			return nil, fmt.Errorf("%v: %w", image, ErrNoRBD)
+			return nil, fmt.Errorf("%v: %w", rbdName, ErrNoRBD)
 		}
-		return nil, fmt.Errorf("error loading %v: %w", image, err)
+		return nil, fmt.Errorf("error loading %v: %w", rbdName, err)
 	}
 
-	rbd := &RBD{Pool: strings.Split(image, "/")[0]}
+	rbd := &RBD{Pool: strings.Split(rbdName, "/")[0], mutex: mutex}
 
 	err = json.Unmarshal(bytes, rbd)
 	if err != nil {
-		return nil, fmt.Errorf("error unmarshalling %v: %w", image, err)
+		return nil, fmt.Errorf("error unmarshalling %v: %w", rbdName, err)
 	}
 
 	//TODO get mapped info
@@ -56,41 +71,67 @@ func GetRBD(image string) (*RBD, error) {
 }
 
 //CreateRBD creates a new rbd image in ceph
-func CreateRBD(image, size string) (*RBD, error) {
-	log.Debugf("executing: rbd create %v --size %v --image-feature exclusive-lock", image, size)
-	err := exec.Command(DrpRbdBinPath, "create", image, "--size", size, "--image-feature", "exclusive-lock").Run() //nolint: gas
+func CreateRBD(rbdName, size string) (*RBD, error) {
+	mutex := getMutex(rbdName)
+	mutex.Lock()
+
+	log.Debugf("executing: rbd create %v --size %v --rbdName-feature exclusive-lock", rbdName, size)
+	err := exec.Command(DrpRbdBinPath, "create", rbdName, "--size", size, "--rbdName-feature", "exclusive-lock").Run() //nolint: gas
 	if err != nil {
 		exitErr, isExitErr := err.(*exec.ExitError)
 		if isExitErr && exitErr.ExitCode() == 17 {
-			log.Debugf("rbd %v already exists", image)
+			log.Debugf("rbd %v already exists", rbdName)
 		} else {
-			return nil, fmt.Errorf("error trying to create the image %v: %w", image, err)
+			return nil, fmt.Errorf("error trying to create the rbdName %v: %w", rbdName, err)
 		}
 	}
 
-	return GetRBD(image)
+	return getRBD(rbdName, mutex)
 }
 
+func getMutex(rbdName string) *sync.Mutex {
+	rbdMutexesMutex.RLock()
+	mutex := rbdMutexes[rbdName]
+	if mutex == nil {
+		rbdMutexesMutex.RUnlock()
+		rbdMutexesMutex.Lock()
+		mutex = rbdMutexes[rbdName]
+		if mutex == nil {
+			mutex = &sync.Mutex{}
+			rbdMutexes[rbdName] = mutex
+		}
+		rbdMutexesMutex.Unlock()
+	} else {
+		rbdMutexesMutex.RUnlock()
+	}
+	return mutex
+}
+
+func (rbd *RBD) Unlock() {
+	rbd.mutex.Unlock()
+}
+
+// MKFS formats the rbd, mapping if rqeuired and unmapping if it was mapped
 func (rbd *RBD) MKFS(fs string) error {
-	dev, err := rbd.Device()
+	dev, mapped, err := rbd.mapAndEnableLocks()
 	if err != nil {
 		return err
 	}
-	if dev == "" {
-		dev, err = rbd.Map()
-	}
-	if err != nil {
-		return err
-	}
+
 	err = exec.Command("mkfs."+fs, dev).Run() //nolint: gas
 	if err != nil {
 		return fmt.Errorf("failed to create filesystem on %v for %v: %w", dev, rbd.RBDName(), err)
 	}
+
+	if mapped {
+		return rbd.UnMap()
+	}
+
 	return nil
 }
 
 //Device returns the device the rbd is mapped to or the empty string if it is not mapped
-func (rbd *RBD) Device() (string, error) {
+func (rbd *RBD) device() (string, error) {
 	mappings, err := ShowMapped()
 	if err != nil {
 		return "", err
@@ -105,28 +146,20 @@ func (rbd *RBD) Device() (string, error) {
 	return "", nil
 }
 
-var ErrRBDNotMapped = errors.New("not mapped")
-
-//MustDevice returns the device the rbd is mapped to or an error if not mapped
-func (rbd *RBD) MustDevice() (string, error) {
-	dev, err := rbd.Device()
-	if err != nil {
-		return "", fmt.Errorf("failed to get device from image %v: %w", rbd.RBDName(), err)
-	}
-
-	if dev == "" {
-		return "", fmt.Errorf("%v not mapped: %w", rbd.RBDName(), ErrRBDNotMapped)
-	}
-
-	return dev, nil
-}
-
+// ErrErrExclusiveLockNotEnabled is returned when an rbd volume does not have exclusive-locks feature enabled
 var ErrExclusiveLockNotEnabled = errors.New("exclusive-lock not enabled")
+
+// EErrExclusiveLockTaken is returned when this client cannot get an exclusive-lock
 var ErrExclusiveLockTaken = errors.New("exclusive-lock is held by another client")
 
-// Map maps an rbd device and returns the device
+// Map maps an rbd device and returns the device or returns an existing device if already mapped
 func (rbd *RBD) Map() (string, error) {
-	dev, err := rbd.mapRBD()
+	dev, _, err := rbd.mapAndEnableLocks()
+	return dev, err
+}
+
+func (rbd *RBD) mapAndEnableLocks() (string, bool, error) {
+	dev, mapped, err := rbd.mapRBD()
 	if err != nil && errors.Is(err, ErrExclusiveLockNotEnabled) {
 		rbd.log().Debug("exclusive lock not enabled, enabling now")
 		err = rbd.EnableExclusiveLocks()
@@ -134,35 +167,35 @@ func (rbd *RBD) Map() (string, error) {
 			err = nil
 		}
 		if err == nil {
-			dev, err = rbd.mapRBD()
+			dev, mapped, err = rbd.mapRBD()
 		}
 	}
-	return dev, err
+	return dev, mapped, err
 }
 
-func (rbd *RBD) mapRBD() (string, error) {
-	dev, err := rbd.Device()
+func (rbd *RBD) mapRBD() (string, bool, error) {
+	dev, err := rbd.device()
 	if err != nil {
-		return "", fmt.Errorf("failed to detrimine if %v is already mapped: %w", rbd.RBDName(), err)
+		return "", false, fmt.Errorf("failed to detrimine if %v is already mapped: %w", rbd.RBDName(), err)
 	}
 
 	if dev != "" {
-		return dev, nil
+		return dev, false, nil
 	}
 
 	out, err := exec.Command(DrpRbdBinPath, "map", "--exclusive", rbd.RBDName()).Output() //nolint: gas
 	exitErr, isExitErr := err.(*exec.ExitError)
 	if isExitErr && exitErr.ExitCode() == 22 {
-		return "", ErrExclusiveLockNotEnabled
+		return "", false, ErrExclusiveLockNotEnabled
 	}
 	if isExitErr && exitErr.ExitCode() == 30 {
-		return "", ErrExclusiveLockTaken
+		return "", false, ErrExclusiveLockTaken
 	}
 	if err != nil {
-		return "", fmt.Errorf("failed to map %v: %w", rbd.RBDName(), err)
+		return "", false, fmt.Errorf("failed to map %v: %w", rbd.RBDName(), err)
 	}
 
-	return strings.TrimSpace(string(out)), nil
+	return strings.TrimSpace(string(out)), true, nil
 }
 
 var ErrExclusiveLockAlreadyEnabled = errors.New("exclusive-lock already enabled")
@@ -205,9 +238,12 @@ func (rbd *RBD) GetOtherNSMounts() ([]*Mount, error) {
 }
 
 func (rbd *RBD) getMounts(getMounts func(string) ([]*Mount, error)) ([]*Mount, error) {
-	dev, err := rbd.MustDevice()
+	dev, err := rbd.device()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get device for %v: %w", rbd.RBDName(), err)
+	}
+	if dev == "" {
+		return []*Mount{}, nil
 	}
 
 	mounts, err := getMounts(dev)
@@ -245,7 +281,7 @@ func (rbd *RBD) Mount(mountpoint string) (string, error) {
 		return mountpoint, nil
 	}
 
-	dev, err := rbd.MustDevice()
+	dev, err := rbd.Map()
 	if err != nil {
 		return "", fmt.Errorf("failed to get device for %v: %w", rbd.RBDName(), err)
 	}
@@ -282,5 +318,30 @@ func (rbd *RBD) Unmount() error {
 			return fmt.Errorf("error unmounting %v from %v: %w", rbd.RBDName(), mp, err)
 		}
 	}
+	return nil
+}
+
+// UnmountAndUnmapIfUnused unmounts the rbd if it is not in use by any other namespaces, then unmapps the rbd
+func (rbd *RBD) UnmountAndUnmapIfUnused() error {
+	otherNSMounts, err := rbd.GetOtherNSMounts()
+	if err != nil {
+		return fmt.Errorf("error getting other ns mounts: %w", err)
+	}
+
+	if len(otherNSMounts) > 0 {
+		rbd.log().Debug("rbd mounted in ohter namespaces")
+		return nil
+	}
+
+	err = rbd.Unmount()
+	if err != nil {
+		return fmt.Errorf("error unmounting: %w", err)
+	}
+
+	err = rbd.UnMap()
+	if err != nil {
+		return fmt.Errorf("error unmapping: %w", err)
+	}
+
 	return nil
 }

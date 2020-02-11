@@ -1,7 +1,6 @@
 package rbddriver
 
 import (
-	"errors"
 	"fmt"
 	"path/filepath"
 
@@ -33,12 +32,38 @@ func NewRbdDriver(pool, defaultSize, defaultFileSystem, mountpoint string) (*Rbd
 	return &RbdDriver{pool: pool, defaultSize: defaultSize, defaultFileSystem: defaultFileSystem, mountpoint: mountpoint}, nil
 }
 
+func (rd *RbdDriver) getRBD(name string) (*RBD, *log.Entry, error) {
+	name, log := rd.nameAndLog(name)
+	rbd, err := GetRBD(name)
+	if err != nil {
+		log.WithError(err).Error("failed to get rbd")
+		err = fmt.Errorf("error getting rbd %v: %w", name, err)
+	}
+	return rbd, log, err
+}
+
+func (rd *RbdDriver) nameAndLog(name string) (string, *log.Entry) {
+	rbdName := rd.pool + "/" + name
+	return rbdName, log.WithField("rbd", name)
+}
+
+func (rd *RbdDriver) rbdMP(rbd *RBD) string {
+	return filepath.Join(rd.mountpoint, rbd.Name)
+}
+
+func (rd *RbdDriver) isMounted(rbd *RBD) (string, error) {
+	mp := rd.rbdMP(rbd)
+	mounted, err := rbd.IsMountedAt(mp)
+	if mounted {
+		return mp, err
+	}
+	return "", err
+}
+
 //Create creates a volume
 func (rd *RbdDriver) Create(req *volume.CreateRequest) error {
 	log.WithField("Request", req).Debug("create")
-
-	name := rd.pool + "/" + req.Name
-	log := log.WithField("rbd", name)
+	name, log := rd.nameAndLog(req.Name)
 
 	size := req.Options["size"]
 	if size == "" {
@@ -48,14 +73,9 @@ func (rd *RbdDriver) Create(req *volume.CreateRequest) error {
 	rbd, err := CreateRBD(name, size)
 	if err != nil {
 		log.WithError(err).Error("error creating rbd")
-		return err
+		return fmt.Errorf("error in driver create: create: %w", err)
 	}
-
-	_, err = rbd.Map()
-	if err != nil {
-		log.WithError(err).Error("error mapping rbd")
-		return err
-	}
+	defer rbd.Unlock()
 
 	fs := req.Options["fs"]
 	if fs == "" {
@@ -65,13 +85,7 @@ func (rd *RbdDriver) Create(req *volume.CreateRequest) error {
 	err = rbd.MKFS(fs)
 	if err != nil {
 		log.WithError(err).Error("error formatting rbd")
-		return err
-	}
-
-	err = rbd.UnMap()
-	if err != nil {
-		log.WithError(err).Error("error unmapping rbd")
-		return err
+		return fmt.Errorf("error in driver create: mkfs: %w", err)
 	}
 
 	return nil
@@ -84,8 +98,8 @@ func (rd *RbdDriver) List() (*volume.ListResponse, error) {
 
 	rbds, err := ListRBDs(rd.pool)
 	if err != nil {
-		log.WithError(err).Error("failed to list rbds")
-		return nil, fmt.Errorf("failed to list rbds in %v: %w", rd.pool, err)
+		log.WithError(err).Error("error in driver list")
+		return nil, fmt.Errorf("error in driver list for %v: %w", rd.pool, err)
 	}
 
 	for _, v := range rbds {
@@ -99,23 +113,19 @@ func (rd *RbdDriver) List() (*volume.ListResponse, error) {
 func (rd *RbdDriver) Get(req *volume.GetRequest) (*volume.GetResponse, error) {
 	log.WithField("Request", req).Debug("Get")
 
-	name := rd.pool + "/" + req.Name
-	log := log.WithField("rbd", name)
-
-	rbd, err := GetRBD(name)
+	rbd, log, err := rd.getRBD(req.Name)
 	if err != nil {
-		log.WithError(err).Error("failed to get rbd")
-		return nil, fmt.Errorf("error getting rbd %v: %w", name, err)
+		return nil, err
 	}
+	defer rbd.Unlock()
 
 	vol := &volume.Volume{Name: rbd.Name}
 
-	mp := filepath.Join(rd.mountpoint, rbd.Name)
-	mounted, err := rbd.IsMountedAt(mp)
+	mp, err := rd.isMounted(rbd)
 	if err != nil {
 		log.WithError(err).Debug("error determining if rbd is already mounted")
 	}
-	if mounted {
+	if mp != "" {
 		vol.Mountpoint = mp
 	}
 
@@ -126,19 +136,16 @@ func (rd *RbdDriver) Get(req *volume.GetRequest) (*volume.GetResponse, error) {
 func (rd *RbdDriver) Remove(req *volume.RemoveRequest) error {
 	log.WithField("request", req).Debug("remove")
 
-	name := rd.pool + "/" + req.Name
-	log := log.WithField("rbd", name)
-
-	rbd, err := GetRBD(name)
+	rbd, log, err := rd.getRBD(req.Name)
 	if err != nil {
-		log.WithError(err).Error("error getting rbd")
-		return fmt.Errorf("error getting %v: %w", name, err)
+		return err
 	}
+	defer rbd.Unlock()
 
 	err = rbd.Remove()
 	if err != nil {
-		log.WithError(err).Error("error removing rbd")
-		return fmt.Errorf("error removing %v: %w", name, err)
+		log.WithError(err).Error("error in driver remove")
+		return fmt.Errorf("error in driver remove: %w", err)
 	}
 
 	return nil
@@ -148,34 +155,20 @@ func (rd *RbdDriver) Remove(req *volume.RemoveRequest) error {
 func (rd *RbdDriver) Path(req *volume.PathRequest) (*volume.PathResponse, error) {
 	log.WithField("request", req).Debug("path")
 
-	name := rd.pool + "/" + req.Name
-	log := log.WithField("rbd", name)
-
-	rbd, err := GetRBD(name)
+	rbd, log, err := rd.getRBD(req.Name)
 	if err != nil {
-		log.WithError(err).Error("error getting rbd")
-		return nil, fmt.Errorf("error getting %v: %w", name, err)
+		return nil, err
+	}
+	defer rbd.Unlock()
+
+	mp, err := rd.isMounted(rbd)
+	if err != nil {
+		log.WithError(err).Error("error in driver path")
+		return nil, fmt.Errorf("error in driver path: %w", err)
 	}
 
-	mp := filepath.Join(rd.mountpoint, rbd.Name)
-	mounted, err := rbd.IsMountedAt(mp)
-	if err != nil {
-		log.WithError(err).Error("error determining if rbd is already mounted")
-		return nil, fmt.Errorf("error checking if %v is mounted at %v: %w", name, mp, err)
-	}
-
-	if mounted {
+	if mp != "" {
 		return &volume.PathResponse{Mountpoint: mp}, nil
-	}
-
-	mounts, err := rbd.GetMounts()
-	if err != nil {
-		log.WithError(err).Error("error getting mounts")
-		return nil, fmt.Errorf("error getting mounts for %v: %w", name, err)
-	}
-
-	for _, mount := range mounts {
-		return &volume.PathResponse{Mountpoint: mount.MountPoint}, nil
 	}
 
 	return nil, nil
@@ -185,28 +178,17 @@ func (rd *RbdDriver) Path(req *volume.PathRequest) (*volume.PathResponse, error)
 func (rd *RbdDriver) Mount(req *volume.MountRequest) (*volume.MountResponse, error) {
 	log.WithField("request", req).Debug("mount")
 
-	name := rd.pool + "/" + req.Name
-	log := log.WithField("rbd", name)
-
-	rbd, err := GetRBD(name)
+	rbd, log, err := rd.getRBD(req.Name)
 	if err != nil {
-		log.WithError(err).Error("error getting rbd")
-		return nil, fmt.Errorf("error getting %v: %w", name, err)
+		return nil, err
 	}
+	defer rbd.Unlock()
 
-	mp := filepath.Join(rd.mountpoint, rbd.Name)
+	mp := rd.rbdMP(rbd)
 	mp, err = rbd.Mount(mp)
-	if err != nil && errors.Is(err, ErrRBDNotMapped) {
-		_, err = rbd.Map()
-		if err != nil {
-			log.WithError(err).Error("error mapping")
-			return nil, fmt.Errorf("error mapping %v: %w", name, err)
-		}
-		mp, err = rbd.Mount(mp)
-	}
 	if err != nil {
-		log.WithError(err).Error("error mounting")
-		return nil, fmt.Errorf("error mounting %v to %v: %w", name, mp, err)
+		log.WithError(err).Error("error in driver mount")
+		return nil, fmt.Errorf("error in driver mount: %w", err)
 	}
 
 	return &volume.MountResponse{Mountpoint: mp}, nil
@@ -216,33 +198,16 @@ func (rd *RbdDriver) Mount(req *volume.MountRequest) (*volume.MountResponse, err
 func (rd *RbdDriver) Unmount(req *volume.UnmountRequest) error {
 	log.WithField("request", req).Debug("unmount")
 
-	name := rd.pool + "/" + req.Name
-	log := log.WithField("rbd", name)
-
-	rbd, err := GetRBD(name)
+	rbd, log, err := rd.getRBD(req.Name)
 	if err != nil {
-		log.WithError(err).Error("error getting rbd")
-		return fmt.Errorf("error getting %v: %w", name, err)
+		return err
 	}
+	defer rbd.Unlock()
 
-	otherNSMounts, err := rbd.GetOtherNSMounts()
+	err = rbd.UnmountAndUnmapIfUnused()
 	if err != nil {
-		log.WithError(err).Error("error getting other namespace mounts")
-		return fmt.Errorf("error getting other ns mounts for %v: %w", name, err)
-	}
-
-	if len(otherNSMounts) == 0 {
-		err = rbd.Unmount()
-		if err != nil {
-			log.WithError(err).Error("error unmounting")
-			return fmt.Errorf("error unmounting %v: %w", name, err)
-		}
-
-		err = rbd.UnMap()
-		if err != nil {
-			log.WithError(err).Error("error unmapping")
-			return fmt.Errorf("error unmapping %v: %w", name, err)
-		}
+		log.WithError(err).Error("error in driver unmount")
+		return fmt.Errorf("error in driver unmount: %w", err)
 	}
 
 	return nil

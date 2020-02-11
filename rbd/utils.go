@@ -2,6 +2,7 @@ package rbddriver
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -9,6 +10,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	log "github.com/sirupsen/logrus"
 )
 
 //Mount represents a kernel mount
@@ -68,13 +71,20 @@ func GetOtherNSMounts(dev string) ([]*Mount, error) {
 	var file string
 	for _, pidDir := range pidDirs {
 		ns, err = getMntNS(pidDir)
+		if err != nil && errors.Is(err, os.ErrNotExist) {
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
 		if _, ok := namespaces[ns]; !ok {
+			log.Debugf("pid: %v, ns: %v", pidDir, ns)
 			namespaces[ns] = struct{}{}
 			file = filepath.Join(pidDir, "mounts")
 			mnts, err = getMountsFromFile(file, dev, ns)
+			if err != nil && errors.Is(err, os.ErrNotExist) {
+				continue
+			}
 			if err != nil {
 				return nil, fmt.Errorf("failed to get mounts from %v: %w", file, err)
 			}
