@@ -33,8 +33,15 @@ func main() {
 			Name:  "omit_timestamp",
 			Usage: "don't add timestamp after snapshot prefix",
 		},
+		cli.BoolFlag{
+			Name:  "verbose",
+			Usage: "verbose output",
+		},
 	}
 	app.Action = func(c *cli.Context) error {
+		if c.Bool("verbose") {
+			log.SetLevel(log.DebugLevel)
+		}
 		return snap(c.String("prefix"), c.BoolT("omit_timestamp"), c.Args()...)
 	}
 
@@ -47,7 +54,10 @@ func main() {
 func snap(prefix string, includeTS bool, patterns ...string) error {
 	var err error
 	for _, pattern := range patterns {
-		patternParts := strings.SplitN(pattern, "/", 1)
+		patternParts := strings.SplitN(pattern, "/", 2)
+		if len(patternParts) != 2 {
+			return fmt.Errorf("invalid pattern %v", pattern)
+		}
 		pool, pattern := patternParts[0], patternParts[1]
 		log := log.WithField("pool", pool).WithField("pattern", pattern)
 		rbds, err := rbdlib.ListRBDs(pool)
@@ -58,6 +68,7 @@ func snap(prefix string, includeTS bool, patterns ...string) error {
 		}
 		for _, rbd := range rbds {
 			log := log.WithField("rbd", rbd)
+			log.Debug("checking match")
 			if m, lErr := filepath.Match(pattern, rbd); !m || lErr != nil {
 				if lErr != nil {
 					log.WithError(lErr).Error("error comparing to pattern")
@@ -65,12 +76,14 @@ func snap(prefix string, includeTS bool, patterns ...string) error {
 				}
 				continue
 			}
+			log.Debug("getting rbd")
 			rbd, lErr := rbdlib.GetRBD(pool + "/" + rbd)
 			if lErr != nil {
 				log.WithError(lErr).Error("error getting rbd")
 				err = fmt.Errorf("error getting rbd %v/%v: %w", pool, rbd, lErr)
 				continue
 			}
+			log.Debug("getting mounts")
 			mounts, lErr := rbd.GetMounts()
 			if lErr != nil {
 				log.WithError(lErr).Error("error getting mounts")
@@ -78,6 +91,7 @@ func snap(prefix string, includeTS bool, patterns ...string) error {
 				continue
 			}
 			frozen := ""
+			log.Debug("freezing mount")
 			for _, mount := range mounts {
 				log := log.WithField("mountpoint", mount.MountPoint)
 				lErr = rbdlib.FSFreeze(mount.MountPoint)
@@ -93,22 +107,26 @@ func snap(prefix string, includeTS bool, patterns ...string) error {
 				log.WithError(lErr).Error("unable to freeze rbd")
 				continue
 			}
+			log = log.WithField("frozen_fs", frozen)
 			snapName := prefix
 			if includeTS {
 				snapName = snapName + "_" + time.Now().UTC().Format(time.RFC3339)
 			}
+			log = log.WithField("snapshot_name", snapName)
+			log.Debug("taking snapshot")
 			_, lErr = rbd.Snapshot(snapName)
 			if lErr != nil {
-				log.WithError(lErr).Errorf("failed to snapshot %v@%v", rbd.RBDName(), snapName)
+				log.WithError(lErr).Errorf("failed to snapshot")
 				err = fmt.Errorf("failed to snapshot %v@%v: %w", rbd.RBDName(), snapName, lErr)
-				continue
 			}
+			log.Debug("unfreezing mount")
 			lErr = rbdlib.FSUnfreeze(frozen)
 			if lErr != nil {
-				log.WithError(lErr).Errorf("failed to unfreeze %v", frozen)
+				log.WithError(lErr).Errorf("failed to unfreeze")
 				err = fmt.Errorf("failed to unfreeze %v: %w", frozen, lErr)
 				continue
 			}
+			log.Info("snapshot complete")
 		}
 	}
 
