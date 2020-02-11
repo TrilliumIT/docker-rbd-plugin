@@ -204,7 +204,8 @@ func (rd *RbdDriver) Unmount(req *volume.UnmountRequest) error {
 	}
 	defer rbd.Unlock()
 
-	err = rbd.UnmountAndUnmapIfUnused()
+	mp := rd.rbdMP(rbd)
+	err = rbd.UnmountAndUnmap(mp)
 	if err != nil {
 		log.WithError(err).Error("error in driver unmount")
 		return fmt.Errorf("error in driver unmount: %w", err)

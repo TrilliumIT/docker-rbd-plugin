@@ -2,7 +2,6 @@ package rbddriver
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -10,8 +9,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-
-	log "github.com/sirupsen/logrus"
 )
 
 //Mount represents a kernel mount
@@ -48,51 +45,6 @@ func GetMounts(dev string) ([]*Mount, error) {
 		return nil, err
 	}
 	return getMountsFromFile("/proc/self/mounts", dev, ns)
-}
-
-//GetOtherNSMounts returns all kernel mounts in other namespaces
-func GetOtherNSMounts(dev string) ([]*Mount, error) {
-	ns, err := getMntNS("/proc/self")
-	if err != nil {
-		return nil, err
-	}
-
-	// Add self ns to the ns map so it gets skipped preemptively
-	namespaces := make(map[string]struct{})
-	namespaces[ns] = struct{}{}
-	mounts := []*Mount{}
-
-	pidDirs, err := filepath.Glob("/proc/[0-9]*")
-	if err != nil {
-		return nil, fmt.Errorf("failed to read /proc pids: %w", err)
-	}
-
-	var mnts []*Mount
-	var file string
-	for _, pidDir := range pidDirs {
-		ns, err = getMntNS(pidDir)
-		if err != nil && errors.Is(err, os.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		if _, ok := namespaces[ns]; !ok {
-			log.Debugf("pid: %v, ns: %v", pidDir, ns)
-			namespaces[ns] = struct{}{}
-			file = filepath.Join(pidDir, "mounts")
-			mnts, err = getMountsFromFile(file, dev, ns)
-			if err != nil && errors.Is(err, os.ErrNotExist) {
-				continue
-			}
-			if err != nil {
-				return nil, fmt.Errorf("failed to get mounts from %v: %w", file, err)
-			}
-			mounts = append(mounts, mnts...)
-		}
-	}
-
-	return mounts, nil
 }
 
 func getMountsFromFile(file, dev, namespace string) ([]*Mount, error) {

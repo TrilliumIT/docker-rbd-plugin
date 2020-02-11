@@ -214,6 +214,10 @@ func (rbd *RBD) EnableExclusiveLocks() error {
 
 func (rbd *RBD) UnMap() error {
 	err := exec.Command(DrpRbdBinPath, "unmap", rbd.RBDName()).Run() //nolint: gas
+	exitErr, isExitErr := err.(*exec.ExitError)
+	if isExitErr && exitErr.ExitCode() == 16 {
+		return fmt.Errorf("error unmapping (is the device mounted elsewhere, or in other containers?): %w", err)
+	}
 	if err != nil {
 		return fmt.Errorf("error unmapping %v: %w", rbd.RBDName(), err)
 	}
@@ -231,10 +235,6 @@ func (rbd *RBD) Remove() error {
 
 func (rbd *RBD) GetMounts() ([]*Mount, error) {
 	return rbd.getMounts(GetMounts)
-}
-
-func (rbd *RBD) GetOtherNSMounts() ([]*Mount, error) {
-	return rbd.getMounts(GetOtherNSMounts)
 }
 
 func (rbd *RBD) getMounts(getMounts func(string) ([]*Mount, error)) ([]*Mount, error) {
@@ -306,34 +306,24 @@ func (rbd *RBD) Mount(mountpoint string) (string, error) {
 	return mountpoint, nil
 }
 
-// Unmount unmounts the rbd anywhere it is mounted in this namespace
-func (rbd *RBD) Unmount() error {
-	mps, err := rbd.GetMounts()
+// Unmount unmounts the from mountpoint
+func (rbd *RBD) Unmount(mountpoint string) error {
+	mounted, err := rbd.IsMountedAt(mountpoint)
 	if err != nil {
-		return fmt.Errorf("error getting mountpoints for %v: %w", rbd.RBDName(), err)
+		return err
 	}
-	for _, mp := range mps {
-		err = syscall.Unmount(mp.MountPoint, 0)
+	if mounted {
+		err = syscall.Unmount(mountpoint, 0)
 		if err != nil {
-			return fmt.Errorf("error unmounting %v from %v: %w", rbd.RBDName(), mp, err)
+			return fmt.Errorf("error unmounting %v from %v: %w", rbd.RBDName(), mountpoint, err)
 		}
 	}
 	return nil
 }
 
-// UnmountAndUnmapIfUnused unmounts the rbd if it is not in use by any other namespaces, then unmapps the rbd
-func (rbd *RBD) UnmountAndUnmapIfUnused() error {
-	otherNSMounts, err := rbd.GetOtherNSMounts()
-	if err != nil {
-		return fmt.Errorf("error getting other ns mounts: %w", err)
-	}
-
-	if len(otherNSMounts) > 0 {
-		rbd.log().Debug("rbd mounted in ohter namespaces")
-		return nil
-	}
-
-	err = rbd.Unmount()
+// UnmountAndUnmapd unmounts the rbd and unmaps it
+func (rbd *RBD) UnmountAndUnmap(mountpoint string) error {
+	err := rbd.Unmount(mountpoint)
 	if err != nil {
 		return fmt.Errorf("error unmounting: %w", err)
 	}
