@@ -103,29 +103,6 @@ func parseMount(line string) *Mount {
 	}
 }
 
-type MappedRBD struct {
-	Pool   string `json:"pool"`
-	Name   string `json:"name"`
-	Snap   string `json:"snap"`
-	Device string `json:"device"`
-}
-
-//GetMappings returns all rbd mappings
-func ShowMapped() (map[string]*MappedRBD, error) {
-	bytes, err := exec.Command(DrpRbdBinPath, "showmapped", "--format", "json").Output() //nolint: gas
-	if err != nil {
-		return nil, fmt.Errorf("failed to showmapped: %w", err)
-	}
-
-	var maps map[string]*MappedRBD
-	err = json.Unmarshal(bytes, &maps)
-	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal %v: %w", string(bytes), err)
-	}
-
-	return maps, nil
-}
-
 //GetImages lists all ceph rbds in our pool
 func ListRBDs(pool string) ([]string, error) {
 	bytes, err := exec.Command(DrpRbdBinPath, "list", "--format", "json", pool).Output() //nolint: gas

@@ -1,6 +1,7 @@
 package rbd
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"unicode"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -128,16 +130,56 @@ func (rbd *RBD) MKFS(fs string) error {
 	return nil
 }
 
+type columns map[string][2]int
+
+func fieldBoundaries(header string) columns {
+	columns := make(map[string][2]int)
+	word, pc, s := "", ' ', 0
+	for i, c := range header {
+		if unicode.IsSpace(pc) && !unicode.IsSpace(c) { // new word boundary
+			if word != "" {
+				columns[word] = [2]int{s, i}
+				word = ""
+			}
+			s = i
+		}
+		if !unicode.IsSpace(c) {
+			word = word + string(c)
+		}
+		pc = c
+	}
+	columns[word] = [2]int{s, len(header)}
+	return columns
+}
+
+func (cols columns) getField(data, field string) string {
+	bounds := cols[field]
+	return strings.TrimSpace(data[bounds[0]:bounds[1]])
+}
+
+var mapFields = []string{"pool", "image", "device"}
+
 //Device returns the device the rbd is mapped to or the empty string if it is not mapped
 func (rbd *RBD) device() (string, error) {
-	mappings, err := ShowMapped()
+	cmd := exec.Command(DrpRbdBinPath, "nbd", "list")
+	stdOut, err := cmd.StdoutPipe()
 	if err != nil {
 		return "", err
 	}
-
-	for _, m := range mappings {
-		if rbd.Pool == m.Pool && rbd.Name == m.Name {
-			return m.Device, nil
+	scanner := bufio.NewScanner(stdOut)
+	scanner.Split(bufio.ScanLines)
+	scanner.Scan()
+	cols := fieldBoundaries(scanner.Text())
+	for _, field := range mapFields {
+		if _, ok := cols[field]; !ok {
+			return "", fmt.Errorf("field %v missing from header %v", field, cols)
+		}
+	}
+	for scanner.Scan() {
+		line := scanner.Text()
+		if rbd.Pool == cols.getField(line, "pool") &&
+			rbd.Name == cols.getField(line, "name") {
+			return cols.getField(line, "device"), nil
 		}
 	}
 
