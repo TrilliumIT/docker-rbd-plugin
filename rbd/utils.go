@@ -1,14 +1,17 @@
 package rbd
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/o1egl/fwencoder"
 )
 
 // DrDrpRbdBinPath is the path to the rbd binary
@@ -61,13 +64,15 @@ func GetMounts(dev string) ([]*Mount, error) {
 
 func getMountsFromFile(file, dev, namespace string) ([]*Mount, error) {
 	mounts := []*Mount{}
-	bytes, err := ioutil.ReadFile(file)
+	f, err := os.Open(file)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read mounts file at %v: %w", file, err)
+		return nil, fmt.Errorf("failed to open file %v: %w", file, err)
 	}
+	defer f.Close()
 
-	lines := strings.Split(string(bytes), "\n")
-	for _, line := range lines {
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
 		if strings.TrimSpace(line) != "" {
 			mount := parseMount(line)
 			mount.NameSpace = namespace
@@ -105,15 +110,9 @@ func parseMount(line string) *Mount {
 
 //GetImages lists all ceph rbds in our pool
 func ListRBDs(pool string) ([]string, error) {
-	bytes, err := exec.Command(DrpRbdBinPath, "list", "--format", "json", pool).Output() //nolint: gas
-	if err != nil {
-		return nil, fmt.Errorf("failed to list rbds in %v: %w", pool, err)
-	}
-
 	var images []string
-	err = json.Unmarshal(bytes, &images)
-	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal %v. %w", string(bytes), err)
+	if err := cmdDecode(jsonDecode(&images), DrpRbdBinPath, "list", "--format", "json", pool); err != nil {
+		return nil, fmt.Errorf("failed to list rbds: %w", err)
 	}
 
 	return images, nil
@@ -147,5 +146,35 @@ func fsFreeze(mountpoint string, unfreeze bool) error {
 		return fmt.Errorf("failed to %v %v: %w", op, mountpoint, err)
 	}
 
+	return nil
+}
+
+func jsonDecode(v interface{}) func(io.Reader) error {
+	return func(r io.Reader) error {
+		return json.NewDecoder(r).Decode(v)
+	}
+}
+
+func colDecode(v interface{}) func(io.Reader) error {
+	return func(r io.Reader) error {
+		return fwencoder.UnmarshalReader(r, v)
+	}
+}
+
+func cmdDecode(decode func(io.Reader) error, name string, arg ...string) error {
+	cmd := exec.Command(name, arg...)
+	stdOut, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("error setting up stdout for cmd %v %v: %w", cmd, arg, err)
+	}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("error starting cmd %v %v: %w", cmd, arg, err)
+	}
+	if err := decode(stdOut); err != nil {
+		return fmt.Errorf("error decoding cmd %v %v: %w", cmd, arg, err)
+	}
+	if err := cmd.Wait(); err != nil {
+		return fmt.Errorf("error waiting on cmd %v %v: %w", cmd, arg, err)
+	}
 	return nil
 }

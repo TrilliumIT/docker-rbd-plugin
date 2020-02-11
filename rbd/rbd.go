@@ -1,8 +1,6 @@
 package rbd
 
 import (
-	"bufio"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -10,7 +8,6 @@ import (
 	"strings"
 	"sync"
 	"syscall"
-	"unicode"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -51,20 +48,9 @@ func GetRBD(rbdName string) (*RBD, error) {
 }
 
 func getRBD(rbdName string, mutex *sync.Mutex) (*RBD, error) {
-	bytes, err := exec.Command(DrpRbdBinPath, "info", "--format", "json", rbdName).Output() //nolint: gas
-	if err != nil {
-		exitErr, isExitErr := err.(*exec.ExitError)
-		if isExitErr && exitErr.ExitCode() == 2 {
-			return nil, fmt.Errorf("%v: %w", rbdName, ErrNoRBD)
-		}
-		return nil, fmt.Errorf("error loading %v: %w", rbdName, err)
-	}
-
 	rbd := &RBD{Pool: strings.Split(rbdName, "/")[0], mutex: mutex}
-
-	err = json.Unmarshal(bytes, rbd)
-	if err != nil {
-		return nil, fmt.Errorf("error unmarshalling %v: %w", rbdName, err)
+	if err := cmdDecode(jsonDecode(rbd), DrpRbdBinPath, "info", "--format", "json", rbdName); err != nil {
+		return nil, fmt.Errorf("error getting rbd: %w", err)
 	}
 
 	return rbd, nil
@@ -130,56 +116,23 @@ func (rbd *RBD) MKFS(fs string) error {
 	return nil
 }
 
-type columns map[string][2]int
-
-func fieldBoundaries(header string) columns {
-	columns := make(map[string][2]int)
-	word, pc, s := "", ' ', 0
-	for i, c := range header {
-		if unicode.IsSpace(pc) && !unicode.IsSpace(c) { // new word boundary
-			if word != "" {
-				columns[word] = [2]int{s, i}
-				word = ""
-			}
-			s = i
-		}
-		if !unicode.IsSpace(c) {
-			word = word + string(c)
-		}
-		pc = c
-	}
-	columns[word] = [2]int{s, len(header)}
-	return columns
+type MappedRBD struct {
+	Pid      int    `column:"pid"`
+	Pool     string `column:"pool"`
+	Name     string `column:"image"`
+	Snapshot string `column:"snap"`
+	Device   string `column:"device"`
 }
-
-func (cols columns) getField(data, field string) string {
-	bounds := cols[field]
-	return strings.TrimSpace(data[bounds[0]:bounds[1]])
-}
-
-var mapFields = []string{"pool", "image", "device"}
 
 //Device returns the device the rbd is mapped to or the empty string if it is not mapped
 func (rbd *RBD) device() (string, error) {
-	cmd := exec.Command(DrpRbdBinPath, "nbd", "list")
-	stdOut, err := cmd.StdoutPipe()
-	if err != nil {
-		return "", err
+	var maps []MappedRBD
+	if err := cmdDecode(colDecode(&maps), "nbd", "list"); err != nil {
+		return "", fmt.Errorf("error listing mapped rbd-nbds: %w", err)
 	}
-	scanner := bufio.NewScanner(stdOut)
-	scanner.Split(bufio.ScanLines)
-	scanner.Scan()
-	cols := fieldBoundaries(scanner.Text())
-	for _, field := range mapFields {
-		if _, ok := cols[field]; !ok {
-			return "", fmt.Errorf("field %v missing from header %v", field, cols)
-		}
-	}
-	for scanner.Scan() {
-		line := scanner.Text()
-		if rbd.Pool == cols.getField(line, "pool") &&
-			rbd.Name == cols.getField(line, "name") {
-			return cols.getField(line, "device"), nil
+	for _, m := range maps {
+		if rbd.Name == m.Name && rbd.Pool == m.Pool {
+			return m.Device, nil
 		}
 	}
 
@@ -223,7 +176,7 @@ func (rbd *RBD) mapRBD() (string, bool, error) {
 		return dev, false, nil
 	}
 
-	out, err := exec.Command(DrpRbdBinPath, "map", "--exclusive", rbd.RBDName()).Output() //nolint: gas
+	out, err := exec.Command(DrpRbdBinPath, "nbd", "map", "--exclusive", rbd.RBDName()).Output() //nolint: gas
 	exitErr, isExitErr := err.(*exec.ExitError)
 	if isExitErr && exitErr.ExitCode() == 22 {
 		return "", false, ErrExclusiveLockNotEnabled

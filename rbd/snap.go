@@ -1,7 +1,6 @@
 package rbd
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os/exec"
@@ -55,22 +54,11 @@ var ErrNoSnap = errors.New("snapshot does not exist")
 
 func (rbd *RBD) getSnapshot(name string, mutex *sync.Mutex) (*Snapshot, error) {
 	snapName := rbd.toSnapName(name)
-	bytes, err := exec.Command(DrpRbdBinPath, "info", "--format", "json", snapName).Output() //nolint: gas
-	if err != nil {
-		exitErr, isExitErr := err.(*exec.ExitError)
-		if isExitErr && exitErr.ExitCode() == 2 {
-			return nil, fmt.Errorf("%v: %w", snapName, ErrNoSnap)
-		}
-		return nil, fmt.Errorf("error loading %v: %w", snapName, err)
-	}
 
 	snap := &Snapshot{RBD: &RBD{Pool: rbd.Pool, mutex: mutex}, Snapshot: name}
-
-	err = json.Unmarshal(bytes, snap)
-	if err != nil {
-		return nil, fmt.Errorf("error unmarshalling %v: %w", snapName, err)
+	if err := cmdDecode(jsonDecode(snap), DrpRbdBinPath, "info", "--format", "json", snapName); err != nil {
+		return nil, fmt.Errorf("error getting snapshot: %w", err)
 	}
-
 	return snap, nil
 }
 
