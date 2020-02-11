@@ -1,10 +1,11 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 
-	"github.com/TrilliumIT/docker-rbd-plugin/rbd"
+	rbdlib "github.com/TrilliumIT/docker-rbd-plugin/rbd"
 	"github.com/docker/go-plugins-helpers/volume"
 	log "github.com/sirupsen/logrus"
 )
@@ -26,9 +27,9 @@ func NewRbdDriver(pool, defaultSize, defaultFileSystem, mountpoint string) (*Rbd
 	return &RbdDriver{pool: pool, defaultSize: defaultSize, defaultFileSystem: defaultFileSystem, mountpoint: mountpoint}, nil
 }
 
-func (rd *RbdDriver) getRBD(name string) (*rbd.RBD, *log.Entry, error) {
+func (rd *RbdDriver) getRBD(name string) (*rbdlib.RBD, *log.Entry, error) {
 	name, log := rd.nameAndLog(name)
-	rbd, err := rbd.GetRBD(name)
+	rbd, err := rbdlib.GetRBD(name)
 	if err != nil {
 		log.WithError(err).Error("failed to get rbd")
 		err = fmt.Errorf("error getting rbd %v: %w", name, err)
@@ -41,11 +42,11 @@ func (rd *RbdDriver) nameAndLog(name string) (string, *log.Entry) {
 	return rbdName, log.WithField("rbd", name)
 }
 
-func (rd *RbdDriver) rbdMP(rbd *rbd.RBD) string {
+func (rd *RbdDriver) rbdMP(rbd *rbdlib.RBD) string {
 	return filepath.Join(rd.mountpoint, rbd.Name)
 }
 
-func (rd *RbdDriver) isMounted(rbd *rbd.RBD) (string, error) {
+func (rd *RbdDriver) isMounted(rbd *rbdlib.RBD) (string, error) {
 	mp := rd.rbdMP(rbd)
 	mounted, err := rbd.IsMountedAt(mp)
 	if mounted {
@@ -64,7 +65,7 @@ func (rd *RbdDriver) Create(req *volume.CreateRequest) error {
 		size = rd.defaultSize
 	}
 
-	rbd, err := rbd.CreateRBD(name, size)
+	rbd, err := rbdlib.CreateRBD(name, size)
 	if err != nil {
 		log.WithError(err).Error("error creating rbd")
 		return fmt.Errorf("error in driver create: create: %w", err)
@@ -90,7 +91,7 @@ func (rd *RbdDriver) List() (*volume.ListResponse, error) {
 	log.Debug("List")
 	var vols []*volume.Volume
 
-	rbds, err := rbd.ListRBDs(rd.pool)
+	rbds, err := rbdlib.ListRBDs(rd.pool)
 	if err != nil {
 		log.WithError(err).Error("error in driver list")
 		return nil, fmt.Errorf("error in driver list for %v: %w", rd.pool, err)
@@ -202,6 +203,11 @@ func (rd *RbdDriver) Unmount(req *volume.UnmountRequest) error {
 	err = rbd.UnmountAndUnmap(mp)
 	if err != nil {
 		log.WithError(err).Error("error in driver unmount")
+		if errors.Is(err, rbdlib.ErrDeviceBusy) {
+			log.Info("remounting device")
+			_, err = rbd.Mount(rd.rbdMP(rbd))
+			return err
+		}
 		return fmt.Errorf("error in driver unmount: %w", err)
 	}
 

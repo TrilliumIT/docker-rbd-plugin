@@ -217,11 +217,13 @@ func (rbd *RBD) EnableExclusiveLocks() error {
 	return nil
 }
 
+var ErrDeviceBusy = errors.New("device busy")
+
 func (rbd *RBD) UnMap() error {
 	err := exec.Command(DrpRbdBinPath, "unmap", rbd.RBDName()).Run() //nolint: gas
 	exitErr, isExitErr := err.(*exec.ExitError)
 	if isExitErr && exitErr.ExitCode() == 16 {
-		return fmt.Errorf("error unmapping (is the device mounted elsewhere, or in other containers?): %w", err)
+		return ErrDeviceBusy
 	}
 	if err != nil {
 		return fmt.Errorf("error unmapping %v: %w", rbd.RBDName(), err)
