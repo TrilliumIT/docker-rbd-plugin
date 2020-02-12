@@ -133,7 +133,7 @@ func isMountedElsewhere(device, mountpoint string) error {
 		if !procDir.IsDir() {
 			continue
 		}
-		pid, err := strconv.Atoi(proc.Name())
+		pid, err := strconv.Atoi(procDir.Name())
 		if err != nil {
 			continue
 		}
@@ -151,11 +151,11 @@ func isMountedElsewhere(device, mountpoint string) error {
 			continue
 		}
 		for _, m := range pidMounts {
-			if m.parent.shared == myMount.parent.shared {
+			if m.parent.shared != 0 && m.parent.shared == myMount.parent.shared {
 				// mounts are in the same peer group
 				continue
 			}
-			if m.parent.master == myMount.parent.shared {
+			if m.parent.master != 0 && m.parent.master == myMount.parent.shared {
 				// mount will recieve events from me when I unmount
 				continue
 			}
@@ -225,6 +225,7 @@ type optionalField struct {
 
 func parseMountinfoLine(line string) (*mountInfo, error) {
 	scanner := bufio.NewScanner(strings.NewReader(line))
+	scanner.Split(bufio.ScanWords)
 
 	toInt := func(s string) (int, error) {
 		i, err := strconv.Atoi(s)
