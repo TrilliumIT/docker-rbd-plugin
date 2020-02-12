@@ -127,7 +127,7 @@ type MappedRBD struct {
 //Device returns the device the rbd is mapped to or the empty string if it is not mapped
 func (rbd *RBD) device() (string, error) {
 	var maps []MappedRBD
-	if err := cmdDecode(colDecode(&maps), "nbd", "list"); err != nil {
+	if err := cmdDecode(colDecode(&maps), DrpRbdBinPath, "nbd", "list"); err != nil {
 		return "", fmt.Errorf("error listing mapped rbd-nbds: %w", err)
 	}
 	for _, m := range maps {
@@ -208,7 +208,11 @@ func (rbd *RBD) EnableExclusiveLocks() error {
 var ErrDeviceBusy = errors.New("device busy")
 
 func (rbd *RBD) UnMap() error {
-	err := exec.Command(DrpRbdBinPath, "unmap", rbd.RBDName()).Run() //nolint: gas
+	dev, err := rbd.device()
+	if err != nil {
+		return fmt.Errorf("error getting device to unmap for %v: %w", rbd.RBDName(), err)
+	}
+	err = exec.Command(DrpRbdBinPath, "nbd", "unmap", dev).Run() //nolint: gas
 	exitErr, isExitErr := err.(*exec.ExitError)
 	if isExitErr && exitErr.ExitCode() == 16 {
 		return ErrDeviceBusy
