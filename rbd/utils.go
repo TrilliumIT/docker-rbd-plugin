@@ -3,6 +3,7 @@ package rbd
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -177,4 +178,135 @@ func cmdDecode(decode func(io.Reader) error, name string, arg ...string) error {
 		return fmt.Errorf("error waiting on cmd %v %v: %w", cmd, arg, err)
 	}
 	return nil
+}
+
+var ErrMountedElsewhere = errors.New("device is still mounted in another location")
+
+func isMountedElsewhere(dev, mountpoint string) error {
+	return nil
+}
+
+type mountInfo struct {
+	id             int
+	parentId       int
+	stDev          stDev
+	root           string
+	mountPoint     string
+	mountOptions   []string
+	optionalFields []optionalField
+	filesystemType string
+	source         string
+	superOptions   []string
+}
+
+type stDev struct {
+	major int
+	minor int
+}
+
+type optionalField struct {
+	tag   string
+	value int
+}
+
+func parseMountinfoLine(line string) (*mountInfo, error) {
+	scanner := bufio.NewScanner(strings.NewReader(line))
+
+	toInt := func(s string) (int, error) {
+		i, err := strconv.Atoi(s)
+		if err != nil {
+			err = fmt.Errorf("unable to convert %v to int: %w", s, err)
+		}
+		return i, err
+	}
+
+	scanFor := func(s string) (string, error) {
+		if !scanner.Scan() {
+			return "", fmt.Errorf("no more fields when parsing for %v", s)
+		}
+		return scanner.Text(), nil
+	}
+
+	scanIntFor := func(s string) (int, error) {
+		s, err := scanFor(s)
+		if err != nil {
+			return 0, err
+		}
+		return toInt(s)
+	}
+
+	scanOpsFor := func(s string) ([]string, error) {
+		s, err := scanFor(s)
+		if err != nil {
+			return nil, err
+		}
+		return strings.Split(s, ","), nil
+	}
+
+	var field string
+	var err error
+	m := &mountInfo{}
+
+	m.id, err = scanIntFor("id")
+	if err != nil {
+		return m, err
+	}
+
+	m.parentId, err = scanIntFor("parent id")
+	if err != nil {
+		return m, err
+	}
+
+	if field, err = scanFor("st_dev"); err != nil {
+		return m, err
+	}
+	if devNums := strings.SplitN(field, ":", 2); len(devNums) > 1 {
+		m.stDev.major, err = toInt(devNums[0])
+		if err != nil {
+			return m, err
+		}
+		m.stDev.minor, err = toInt(devNums[1])
+		if err != nil {
+			return m, err
+		}
+	} else {
+		return m, fmt.Errorf("only %v of 2 fields in dev number %v", len(devNums), field)
+	}
+
+	if m.root, err = scanFor("root"); err != nil {
+		return m, err
+	}
+
+	if m.mountPoint, err = scanFor("mount point"); err != nil {
+		return m, err
+	}
+
+	if m.mountOptions, err = scanOpsFor("mount options"); err != nil {
+		return m, err
+	}
+
+	for field, err = scanFor("optional fields"); field != "-"; field, err = scanFor("optional fields") {
+		if err != nil {
+			return m, err
+		}
+		parts := strings.SplitN(field, ":", 2)
+		if len(parts) > 1 {
+			if val, err := toInt(parts[1]); err == nil {
+				// ignore unknown values by only doing if err is nil
+				m.optionalFields = append(m.optionalFields, optionalField{parts[0], val})
+			}
+		}
+	}
+
+	if m.filesystemType, err = scanFor("filesystem type"); err != nil {
+		return m, err
+	}
+	if m.source, err = scanFor("source"); err != nil {
+		return m, err
+	}
+	if m.superOptions, err = scanOpsFor("super options"); err != nil {
+		return m, err
+	}
+
+	return m, err
 }
