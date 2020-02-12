@@ -232,40 +232,25 @@ func (rbd *RBD) Remove() error {
 	return nil
 }
 
-func (rbd *RBD) GetMounts() ([]*Mount, error) {
-	return rbd.getMounts(GetMounts)
-}
-
-func (rbd *RBD) getMounts(getMounts func(string) ([]*Mount, error)) ([]*Mount, error) {
-	dev, err := rbd.device()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get device for %v: %w", rbd.RBDName(), err)
-	}
-	if dev == "" {
-		return []*Mount{}, nil
-	}
-
-	mounts, err := getMounts(dev)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get the mounts for %v(%v): %w", dev, rbd.RBDName(), err)
-	}
-
-	return mounts, nil
-}
-
 // MountsIn gets mountpoint
 func (rbd *RBD) IsMountedAt(mountpoint string) (bool, error) {
-	mounts, err := rbd.GetMounts()
+	dev, err := rbd.device()
 	if err != nil {
 		return false, err
 	}
+	if dev == "" {
+		return false, nil
+	}
 
-	for _, mount := range mounts {
-		if mount.MountPoint == mountpoint {
+	myMounts, err := getMountInfoForDevFromFile("/proc/self/mountinfo", dev)
+	if err != nil {
+		return false, err
+	}
+	for _, m := range myMounts {
+		if m.mountPoint == mountpoint {
 			return true, nil
 		}
 	}
-
 	return false, nil
 }
 

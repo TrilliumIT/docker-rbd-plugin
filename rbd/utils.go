@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -24,88 +23,6 @@ func init() {
 	DrpRbdBinPath, err = exec.LookPath("rbd")
 	if err != nil {
 		panic(fmt.Errorf("unable to find rbd binary: %w", err))
-	}
-}
-
-//Mount represents a kernel mount
-type Mount struct {
-	//Device is the mount's device
-	Device string
-	//MountPoint is the path
-	MountPoint string
-	//FSType is the filesystem type
-	FSType string
-	//Options is a string representing the mount's options
-	Options string
-	//Dump is that first number that no one uses
-	Dump bool
-	//FsckOrder is the second one
-	FsckOrder int
-	//Namespace is the namespace the mount is in
-	NameSpace string
-}
-
-func getMntNS(pidPath string) (string, error) {
-	nsPath := filepath.Join(pidPath, "ns", "mnt")
-	ns, err := os.Readlink(nsPath)
-	if err != nil {
-		return "", fmt.Errorf("failed to get ns from %v: %w", nsPath, err)
-	}
-	return ns, nil
-}
-
-//GetMounts returns all kernel mounts in this namespace
-func GetMounts(dev string) ([]*Mount, error) {
-	ns, err := getMntNS("/proc/self")
-	if err != nil {
-		return nil, err
-	}
-	return getMountsFromFile("/proc/self/mounts", dev, ns)
-}
-
-func getMountsFromFile(file, dev, namespace string) ([]*Mount, error) {
-	mounts := []*Mount{}
-	f, err := os.Open(file)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open file %v: %w", file, err)
-	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.TrimSpace(line) != "" {
-			mount := parseMount(line)
-			mount.NameSpace = namespace
-			if mount.Device == dev {
-				mounts = append(mounts, mount)
-			}
-		}
-	}
-
-	return mounts, nil
-}
-
-func parseMount(line string) *Mount {
-	attrs := strings.Split(line, " ")
-
-	dump, err := strconv.Atoi(attrs[4])
-	if err != nil {
-		dump = 0
-	}
-	var fo int
-	fo, err = strconv.Atoi(attrs[5])
-	if err != nil {
-		fo = 0
-	}
-
-	return &Mount{
-		Device:     attrs[0],
-		MountPoint: attrs[1],
-		FSType:     attrs[2],
-		Options:    attrs[3],
-		Dump:       dump == 1,
-		FsckOrder:  fo,
 	}
 }
 
@@ -317,19 +234,23 @@ func parseMountinfoLine(line string) (*mountInfo, error) {
 		return i, err
 	}
 
-	scanFor := func(s string) (string, error) {
+	scanFor := func(prop string) (string, error) {
 		if !scanner.Scan() {
-			return "", fmt.Errorf("no more fields when parsing for %v", s)
+			return "", fmt.Errorf("no more fields when parsing for %v", prop)
 		}
 		return scanner.Text(), nil
 	}
 
-	scanIntFor := func(s string) (int, error) {
-		s, err := scanFor(s)
+	scanIntFor := func(prop string) (int, error) {
+		s, err := scanFor(prop)
 		if err != nil {
 			return 0, err
 		}
-		return toInt(s)
+		i, err := toInt(s)
+		if err != nil {
+			err = fmt.Errorf("error parsing for %v: %w", prop, err)
+		}
+		return i, err
 	}
 
 	scanOpsFor := func(s string) ([]string, error) {
