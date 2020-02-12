@@ -269,6 +269,18 @@ func (rbd *RBD) IsMountedAt(mountpoint string) (bool, error) {
 	return false, nil
 }
 
+// IsMountedElsewhere returns an error if the rbd is mounted anywhere but the specified mountpoint
+func (rbd *RBD) IsMountedElsewhere(mountpoint string) error {
+	dev, err := rbd.device()
+	if err != nil {
+		return err
+	}
+	if dev == "" {
+		return nil
+	}
+	return isMountedElsewhere(dev, mountpoint)
+}
+
 //Mount mounts the image
 func (rbd *RBD) Mount(mountpoint string) (string, error) {
 	alreadyMounted, err := rbd.IsMountedAt(mountpoint)
@@ -312,6 +324,9 @@ func (rbd *RBD) Unmount(mountpoint string) error {
 		return err
 	}
 	if mounted {
+		if err = rbd.IsMountedElsewhere(mountpoint); err != nil {
+			return err
+		}
 		err = syscall.Unmount(mountpoint, 0)
 		if err != nil {
 			return fmt.Errorf("error unmounting %v from %v: %w", rbd.RBDName(), mountpoint, err)
