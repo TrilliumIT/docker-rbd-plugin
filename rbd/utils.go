@@ -110,14 +110,14 @@ func isMountedElsewhere(device, mountpoint string) error {
 		return err
 	}
 	for _, m := range myMounts {
-		if m.mountPoint != mountpoint {
-			return fmt.Errorf("%v is mounted at %v: %w", device, m.mountPoint, ErrMountedElsewhere)
+		if m.MountPoint != mountpoint {
+			return fmt.Errorf("%v is mounted at %v: %w", device, m.MountPoint, ErrMountedElsewhere)
 		}
 	}
-	if len(myMounts) != 1 {
-		return nil
+	var myMount *MountInfo
+	if len(myMounts) > 0 {
+		myMount = myMounts[0]
 	}
-	myMount := myMounts[0]
 
 	namespaces := map[string]struct{}{myNs: struct{}{}}
 	proc, err := os.Open("/proc")
@@ -151,66 +151,68 @@ func isMountedElsewhere(device, mountpoint string) error {
 			continue
 		}
 		for _, m := range pidMounts {
-			if m.parent.shared != 0 && m.parent.shared == myMount.parent.shared {
-				// mounts are in the same peer group
-				continue
+			if myMount != nil {
+				if m.Parent.Shared != 0 && m.Parent.Shared == myMount.Parent.Shared {
+					// mounts are in the same peer group
+					continue
+				}
+				if m.Parent.Master != 0 && m.Parent.Master == myMount.Parent.Shared {
+					// mount will recieve events from me when I unmount
+					continue
+				}
 			}
-			if m.parent.master != 0 && m.parent.master == myMount.parent.shared {
-				// mount will recieve events from me when I unmount
-				continue
-			}
-			return fmt.Errorf("%v is mounted at %v in pid %v ns %v with pg shared:%v master:%v: %w", device, m.mountPoint, pid, ns, m.shared, m.master, ErrMountedElsewhere)
+			return fmt.Errorf("%v is mounted at %v in pid %v ns %v with pg shared:%v master:%v: %w", device, m.MountPoint, pid, ns, m.Shared, m.Master, ErrMountedElsewhere)
 		}
 		namespaces[ns] = struct{}{}
 	}
 	return nil
 }
 
-func getMountInfoForDevFromFile(mountInfoFile, device string) ([]*mountInfo, error) {
-	file, err := os.Open(mountInfoFile)
+func getMountInfoForDevFromFile(MountInfoFile, device string) ([]*MountInfo, error) {
+	file, err := os.Open(MountInfoFile)
 	if err != nil {
 		return nil, err
 	}
 	defer file.Close()
-	mounts := []*mountInfo{}
-	otherMounts := make(map[int]*mountInfo)
+	mounts := []*MountInfo{}
+	otherMounts := make(map[int]*MountInfo)
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		m, err := parseMountinfoLine(scanner.Text())
 		if err != nil {
 			return mounts, err
 		}
-		if m.source == device {
+		if m.Source == device {
 			mounts = append(mounts, m)
 		} else {
-			otherMounts[m.id] = m
+			otherMounts[m.Id] = m
 		}
 	}
 	for _, m := range mounts {
-		parent, ok := otherMounts[m.parentId]
+		parent, ok := otherMounts[m.ParentId]
 		if !ok {
 			return mounts, fmt.Errorf("parent mount not found")
 		}
-		m.parent = parent
+		m.Parent = parent
 	}
 	return mounts, scanner.Err()
 }
 
-type mountInfo struct {
-	id             int
-	parentId       int
-	stDev          stDev
-	root           string
-	mountPoint     string
-	mountOptions   []string
-	optionalFields []optionalField
-	filesystemType string
-	source         string
-	superOptions   []string
+type MountInfo struct {
+	Id             int
+	ParentId       int
+	StDev          stDev
+	Root           string
+	MountPoint     string
+	MountOptions   []string
+	OptionalFields []optionalField
+	FilesystemType string
+	Source         string
+	SuperOptions   []string
 	// extra parsed options
-	shared int
-	master int
-	parent *mountInfo
+	Shared int
+	Master int
+	Parent *MountInfo
 }
 
 type stDev struct {
@@ -223,7 +225,7 @@ type optionalField struct {
 	value int
 }
 
-func parseMountinfoLine(line string) (*mountInfo, error) {
+func parseMountinfoLine(line string) (*MountInfo, error) {
 	scanner := bufio.NewScanner(strings.NewReader(line))
 	scanner.Split(bufio.ScanWords)
 
@@ -264,14 +266,14 @@ func parseMountinfoLine(line string) (*mountInfo, error) {
 
 	var field string
 	var err error
-	m := &mountInfo{}
+	m := &MountInfo{}
 
-	m.id, err = scanIntFor("id")
+	m.Id, err = scanIntFor("id")
 	if err != nil {
 		return m, err
 	}
 
-	m.parentId, err = scanIntFor("parent id")
+	m.ParentId, err = scanIntFor("parent id")
 	if err != nil {
 		return m, err
 	}
@@ -280,11 +282,11 @@ func parseMountinfoLine(line string) (*mountInfo, error) {
 		return m, err
 	}
 	if devNums := strings.SplitN(field, ":", 2); len(devNums) > 1 {
-		m.stDev.major, err = toInt(devNums[0])
+		m.StDev.major, err = toInt(devNums[0])
 		if err != nil {
 			return m, err
 		}
-		m.stDev.minor, err = toInt(devNums[1])
+		m.StDev.minor, err = toInt(devNums[1])
 		if err != nil {
 			return m, err
 		}
@@ -292,15 +294,15 @@ func parseMountinfoLine(line string) (*mountInfo, error) {
 		return m, fmt.Errorf("only %v of 2 fields in dev number %v", len(devNums), field)
 	}
 
-	if m.root, err = scanFor("root"); err != nil {
+	if m.Root, err = scanFor("root"); err != nil {
 		return m, err
 	}
 
-	if m.mountPoint, err = scanFor("mount point"); err != nil {
+	if m.MountPoint, err = scanFor("mount point"); err != nil {
 		return m, err
 	}
 
-	if m.mountOptions, err = scanOpsFor("mount options"); err != nil {
+	if m.MountOptions, err = scanOpsFor("mount options"); err != nil {
 		return m, err
 	}
 
@@ -313,24 +315,24 @@ func parseMountinfoLine(line string) (*mountInfo, error) {
 			tag := parts[0]
 			if val, err := toInt(parts[1]); err == nil {
 				// ignore unknown values by only doing if err is nil
-				m.optionalFields = append(m.optionalFields, optionalField{tag, val})
+				m.OptionalFields = append(m.OptionalFields, optionalField{tag, val})
 				if tag == "shared" {
-					m.shared = val
+					m.Shared = val
 				}
 				if tag == "master" {
-					m.master = val
+					m.Master = val
 				}
 			}
 		}
 	}
 
-	if m.filesystemType, err = scanFor("filesystem type"); err != nil {
+	if m.FilesystemType, err = scanFor("filesystem type"); err != nil {
 		return m, err
 	}
-	if m.source, err = scanFor("source"); err != nil {
+	if m.Source, err = scanFor("source"); err != nil {
 		return m, err
 	}
-	if m.superOptions, err = scanOpsFor("super options"); err != nil {
+	if m.SuperOptions, err = scanOpsFor("super options"); err != nil {
 		return m, err
 	}
 

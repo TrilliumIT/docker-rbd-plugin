@@ -131,7 +131,7 @@ func (rbd *RBD) device() (string, error) {
 		return "", fmt.Errorf("error listing mapped rbd-nbds: %w", err)
 	}
 	for _, m := range maps {
-		if rbd.Name == m.Name && rbd.Pool == m.Pool {
+		if rbd.Name == m.Name && rbd.Pool == m.Pool && m.Snapshot == "-" {
 			return m.Device, nil
 		}
 	}
@@ -234,24 +234,33 @@ func (rbd *RBD) Remove() error {
 
 // MountsIn gets mountpoint
 func (rbd *RBD) IsMountedAt(mountpoint string) (bool, error) {
-	dev, err := rbd.device()
-	if err != nil {
-		return false, err
-	}
-	if dev == "" {
-		return false, nil
-	}
-
-	myMounts, err := getMountInfoForDevFromFile("/proc/self/mountinfo", dev)
+	myMounts, err := rbd.GetMounts()
 	if err != nil {
 		return false, err
 	}
 	for _, m := range myMounts {
-		if m.mountPoint == mountpoint {
+		if m.MountPoint == mountpoint {
 			return true, nil
 		}
 	}
 	return false, nil
+}
+
+func (rbd *RBD) IsMapped() (bool, error) {
+	dev, err := rbd.device()
+	return dev != "", err
+}
+
+func (rbd *RBD) GetMounts() ([]*MountInfo, error) {
+	dev, err := rbd.device()
+	if err != nil {
+		return nil, err
+	}
+	if dev == "" {
+		return []*MountInfo{}, nil
+	}
+
+	return getMountInfoForDevFromFile("/proc/self/mountinfo", dev)
 }
 
 // IsMountedElsewhere returns an error if the rbd is mounted anywhere but the specified mountpoint
