@@ -4,8 +4,24 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
-	"sync"
 )
+
+type Snap struct {
+	dev
+	image *Image
+}
+
+func getSnap(img *Image, name string) *Snap {
+	return &Snap{dev{name: name}, img}
+}
+
+func (snap *Snap) FullName() string {
+	return snap.image.FullName() + "@" + snap.Name()
+}
+
+func (snap *Snap) Pool() *Pool {
+	return snap.image.Pool()
+}
 
 type Snapshot struct {
 	*RBD
@@ -31,31 +47,27 @@ func (rbd *RBD) toSnapName(name string) string {
 // Snapshot snapshots an rbd
 func (rbd *RBD) Snapshot(name string) (*Snapshot, error) {
 	snapName := rbd.toSnapName(name)
-	mutex := getMutex(snapName)
-	mutex.Lock()
 
 	err := exec.Command(DrpRbdBinPath, "snap", "create", snapName).Run() //nolint: gas
 	if err != nil {
 		return nil, fmt.Errorf("error creating snapshot %v: %w", snapName, err)
 	}
 
-	return rbd.getSnapshot(name, mutex)
+	return rbd.getSnapshot(name)
 }
 
 // GetSnapshot snapshots an rbd
 func (rbd *RBD) GetSnapshot(name string) (*Snapshot, error) {
-	mutex := getMutex(rbd.toSnapName(name))
-	mutex.Lock()
-	return rbd.getSnapshot(name, mutex)
+	return rbd.getSnapshot(name)
 }
 
 // ErrNoRBD is returned when an rbd does not exist
 var ErrNoSnap = errors.New("snapshot does not exist")
 
-func (rbd *RBD) getSnapshot(name string, mutex *sync.Mutex) (*Snapshot, error) {
+func (rbd *RBD) getSnapshot(name string) (*Snapshot, error) {
 	snapName := rbd.toSnapName(name)
 
-	snap := &Snapshot{RBD: &RBD{Pool: rbd.Pool, mutex: mutex}, Snapshot: name}
+	snap := &Snapshot{RBD: &RBD{Pool: rbd.Pool}, Snapshot: name}
 	if err := cmdDecode(jsonDecode(snap), DrpRbdBinPath, "info", "--format", "json", snapName); err != nil {
 		return nil, fmt.Errorf("error getting snapshot: %w", err)
 	}

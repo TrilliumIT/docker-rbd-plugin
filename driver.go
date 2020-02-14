@@ -4,8 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"syscall"
 
-	rbdlib "github.com/TrilliumIT/docker-rbd-plugin/rbd"
+	"github.com/TrilliumIT/docker-rbd-plugin/rbd"
 	"github.com/docker/go-plugins-helpers/volume"
 	log "github.com/sirupsen/logrus"
 )
@@ -13,7 +14,7 @@ import (
 //RbdDriver implements volume.Driver
 type RbdDriver struct {
 	volume.Driver
-	pool              string
+	pool              *rbd.Pool
 	defaultSize       string
 	defaultFileSystem string
 	mountpoint        string
@@ -24,63 +25,54 @@ func NewRbdDriver(pool, defaultSize, defaultFileSystem, mountpoint string) (*Rbd
 	log.SetLevel(log.DebugLevel)
 	log.Debug("Creating new RbdDriver.")
 
-	return &RbdDriver{pool: pool, defaultSize: defaultSize, defaultFileSystem: defaultFileSystem, mountpoint: mountpoint}, nil
+	return &RbdDriver{pool: rbd.GetPool(pool), defaultSize: defaultSize, defaultFileSystem: defaultFileSystem, mountpoint: mountpoint}, nil
 }
 
-func (rd *RbdDriver) getRBD(name string) (*rbdlib.RBD, *log.Entry, error) {
-	name, log := rd.nameAndLog(name)
-	rbd, err := rbdlib.GetRBD(name)
-	if err != nil {
-		log.WithError(err).Error("failed to get rbd")
-		err = fmt.Errorf("error getting rbd %v: %w", name, err)
-	}
-	return rbd, log, err
+func (rd *RbdDriver) mountPoint(img *rbd.Image) string {
+	return filepath.Join(rd.mountpoint, img.Name())
 }
 
-func (rd *RbdDriver) nameAndLog(name string) (string, *log.Entry) {
-	rbdName := rd.pool + "/" + name
-	return rbdName, log.WithField("rbd", name)
-}
-
-func (rd *RbdDriver) rbdMP(rbd *rbdlib.RBD) string {
-	return filepath.Join(rd.mountpoint, rbd.Name)
-}
-
-func (rd *RbdDriver) isMounted(rbd *rbdlib.RBD) (string, error) {
-	mp := rd.rbdMP(rbd)
-	mounted, err := rbd.IsMountedAt(mp)
+func (rd *RbdDriver) isMounted(img *rbd.Image) (string, error) {
+	mp := rd.mountPoint(img)
+	mounted, err := img.IsMountedAt(mp)
 	if mounted {
 		return mp, err
 	}
 	return "", err
 }
 
+func (rd *RbdDriver) imgFullName(name string) string {
+	return rd.pool.Name() + "/" + name
+}
+
+func (rd *RbdDriver) imgReqInit(name string) (string, *log.Entry, func()) {
+	imgName := rd.imgFullName(name)
+	lock(imgName)
+	log := log.WithField("image", imgName)
+	return imgName, log, func() { unlock(imgName) }
+}
+
 //Create creates a volume
 func (rd *RbdDriver) Create(req *volume.CreateRequest) error {
 	log.WithField("Request", req).Debug("create")
-	name, log := rd.nameAndLog(req.Name)
+
+	_, log, unlock := rd.imgReqInit(req.Name)
+	defer unlock()
 
 	size := req.Options["size"]
 	if size == "" {
 		size = rd.defaultSize
 	}
 
-	rbd, err := rbdlib.CreateRBD(name, size)
-	if err != nil {
-		log.WithError(err).Error("error creating rbd")
-		return fmt.Errorf("error in driver create: create: %w", err)
-	}
-	defer rbd.Unlock()
-
 	fs := req.Options["fs"]
 	if fs == "" {
 		fs = rd.defaultFileSystem
 	}
 
-	err = rbd.MKFS(fs)
+	_, err := rd.pool.CreateImageWithFileSystem(req.Name, size, fs, "--image-feature", "exclusive-lock")
 	if err != nil {
-		log.WithError(err).Error("error formatting rbd")
-		return fmt.Errorf("error in driver create: mkfs: %w", err)
+		log.WithError(err).Error("error creating image")
+		return fmt.Errorf("error in driver create: create: %w", err)
 	}
 
 	return nil
@@ -89,34 +81,46 @@ func (rd *RbdDriver) Create(req *volume.CreateRequest) error {
 //List lists the volumes
 func (rd *RbdDriver) List() (*volume.ListResponse, error) {
 	log.Debug("List")
-	var vols []*volume.Volume
+	log := log.WithField("pool", rd.pool.Name())
 
-	rbds, err := rbdlib.ListRBDs(rd.pool)
+	mutexMapMutex.Lock()
+	defer mutexMapMutex.Unlock()
+	imgs, err := rd.pool.Images()
 	if err != nil {
 		log.WithError(err).Error("error in driver list")
-		return nil, fmt.Errorf("error in driver list for %v: %w", rd.pool, err)
+		return nil, fmt.Errorf("error in driver list for %v: %w", rd.pool.Name(), err)
 	}
-
-	for _, v := range rbds {
-		vols = append(vols, &volume.Volume{Name: v})
+	vols := make([]*volume.Volume, len(imgs), len(imgs))
+	for _, img := range imgs {
+		vols = append(vols, &volume.Volume{Name: img.Name()})
 	}
 
 	return &volume.ListResponse{Volumes: vols}, nil
+}
+
+func (rd *RbdDriver) getImg(name string) (*rbd.Image, error) {
+	img, err := rd.pool.GetImage(name)
+	if err != nil {
+		log.WithField("image", rd.pool.Name()+"/"+name).WithError(err).Error("error getting device")
+	}
+	return img, err
 }
 
 //Get returns a volume
 func (rd *RbdDriver) Get(req *volume.GetRequest) (*volume.GetResponse, error) {
 	log.WithField("Request", req).Debug("Get")
 
-	rbd, log, err := rd.getRBD(req.Name)
+	_, log, unlock := rd.imgReqInit(req.Name)
+	defer unlock()
+
+	img, err := rd.getImg(req.Name)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error in driver get: %w", err)
 	}
-	defer rbd.Unlock()
 
-	vol := &volume.Volume{Name: rbd.Name}
+	vol := &volume.Volume{Name: img.Name()}
 
-	mp, err := rd.isMounted(rbd)
+	mp, err := rd.isMounted(img)
 	if err != nil {
 		log.WithError(err).Debug("error determining if rbd is already mounted")
 	}
@@ -131,32 +135,34 @@ func (rd *RbdDriver) Get(req *volume.GetRequest) (*volume.GetResponse, error) {
 func (rd *RbdDriver) Remove(req *volume.RemoveRequest) error {
 	log.WithField("request", req).Debug("remove")
 
-	rbd, log, err := rd.getRBD(req.Name)
-	if err != nil {
-		return err
-	}
-	defer rbd.Unlock()
+	_, log, unlock := rd.imgReqInit(req.Name)
+	defer unlock()
 
-	err = rbd.Remove()
+	img, err := rd.getImg(req.Name)
 	if err != nil {
-		log.WithError(err).Error("error in driver remove")
 		return fmt.Errorf("error in driver remove: %w", err)
 	}
 
-	return nil
+	if err = img.Remove(); err != nil {
+		log.WithError(err).Error("error in driver remove")
+		return fmt.Errorf("error in driver remove: %w", err)
+	}
+	return err
 }
 
 //Path returns the mount point of a volume
 func (rd *RbdDriver) Path(req *volume.PathRequest) (*volume.PathResponse, error) {
 	log.WithField("request", req).Debug("path")
 
-	rbd, log, err := rd.getRBD(req.Name)
-	if err != nil {
-		return nil, err
-	}
-	defer rbd.Unlock()
+	_, log, unlock := rd.imgReqInit(req.Name)
+	defer unlock()
 
-	mp, err := rd.isMounted(rbd)
+	img, err := rd.getImg(req.Name)
+	if err != nil {
+		return nil, fmt.Errorf("error in driver path: %w", err)
+	}
+
+	mp, err := rd.isMounted(img)
 	if err != nil {
 		log.WithError(err).Error("error in driver path")
 		return nil, fmt.Errorf("error in driver path: %w", err)
@@ -173,14 +179,16 @@ func (rd *RbdDriver) Path(req *volume.PathRequest) (*volume.PathResponse, error)
 func (rd *RbdDriver) Mount(req *volume.MountRequest) (*volume.MountResponse, error) {
 	log.WithField("request", req).Debug("mount")
 
-	rbd, log, err := rd.getRBD(req.Name)
-	if err != nil {
-		return nil, err
-	}
-	defer rbd.Unlock()
+	_, log, unlock := rd.imgReqInit(req.Name)
+	defer unlock()
 
-	mp := rd.rbdMP(rbd)
-	mp, err = rbd.Mount(mp)
+	img, err := rd.getImg(req.Name)
+	if err != nil {
+		return nil, fmt.Errorf("error in driver mount: %w", err)
+	}
+
+	mp := rd.mountPoint(img)
+	err = img.MapAndMountExclusive(mp, syscall.MS_NOATIME)
 	if err != nil {
 		log.WithError(err).Error("error in driver mount")
 		return nil, fmt.Errorf("error in driver mount: %w", err)
@@ -193,21 +201,22 @@ func (rd *RbdDriver) Mount(req *volume.MountRequest) (*volume.MountResponse, err
 func (rd *RbdDriver) Unmount(req *volume.UnmountRequest) error {
 	log.WithField("request", req).Debug("unmount")
 
-	rbd, log, err := rd.getRBD(req.Name)
-	if err != nil {
-		return err
-	}
-	defer rbd.Unlock()
+	_, log, unlock := rd.imgReqInit(req.Name)
+	defer unlock()
 
-	mp := rd.rbdMP(rbd)
-	err = rbd.UnmountAndUnmap(mp)
+	img, err := rd.getImg(req.Name)
 	if err != nil {
-		log.WithError(err).Error("error in driver unmount")
-		if errors.Is(err, rbdlib.ErrDeviceBusy) {
-			log.Info("remounting device")
-			_, err = rbd.Mount(rd.rbdMP(rbd))
-			return err
+		return fmt.Errorf("error in driver unmount: %w", err)
+	}
+
+	mp := rd.mountPoint(img)
+	err = img.UnmountAndUnmap(mp)
+	if err != nil {
+		if errors.Is(err, rbd.ErrMountedElsewhere) {
+			log.WithError(err).Info("device still in use, not unmounting")
+			return nil
 		}
+		log.WithError(err).Error("error in driver unmount")
 		return fmt.Errorf("error in driver unmount: %w", err)
 	}
 
