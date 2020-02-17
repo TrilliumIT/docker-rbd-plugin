@@ -1,69 +1,81 @@
 package rbd
 
-type Snap struct {
+import "syscall"
+
+type Snapshot struct {
 	name  string
 	image *Image
 }
 
-var _ Dev = (*Snap)(nil) // compile check that Image satisfies  Dev
-
-func getSnap(img *Image, name string) *Snap {
-	return &Snap{name, img}
+type snapshotListEntry struct {
+	ID        int    `json:"id"`
+	Name      string `json:"name"`
+	Size      int64  `json:"size"`
+	Timestamp string `json:"timestamp"`
 }
 
-func (snap *Snap) Name() string {
+const XFS_MOUNT_NORECOVERY uintptr = 1 << 10 // see xfs_mount.h
+
+var _ Dev = (*Snapshot)(nil) // compile check that Image satisfies  Dev
+
+func getSnapshot(img *Image, name string) *Snapshot {
+	return &Snapshot{name, img}
+}
+
+func (snap *Snapshot) Name() string {
 	return snap.name
 }
 
-func (snap *Snap) ImageName() string {
+func (snap *Snapshot) ImageName() string {
 	return snap.image.Name() + "@" + snap.Name()
 }
 
-func (snap *Snap) FullName() string {
-	return snap.image.FullName() + "@" + snap.Name()
+func (snap *Snapshot) FullName() string {
+	return devFullName(snap)
 }
 
-func (snap *Snap) Pool() *Pool {
+func (snap *Snapshot) Pool() *Pool {
 	return snap.image.Pool()
 }
 
-func (snap *Snap) IsMountedAt(mountPoint string) (bool, error) {
+func (snap *Snapshot) Info() (*DevInfo, error) {
+	return devInfo(snap)
+}
+
+func (snap *Snapshot) IsMountedAt(mountPoint string) (bool, error) {
 	return devIsMountedAt(snap, mountPoint)
 }
 
-func (snap *Snap) Map(args ...string) (string, error) {
+func (snap *Snapshot) Map(args ...string) (string, error) {
+	args = append([]string{"--read-only"}, args...)
 	return devMap(snap, args...)
 }
 
-func (snap *Snap) Mount(mountPoint string, flags uintptr) error {
-	// TODO
-	return nil
+func (snap *Snapshot) Mount(mountPoint, fs string, flags uintptr) error {
+	flags = flags & syscall.MS_RDONLY
+	return devMount(snap, mountPoint, fs, flags)
 }
 
-func (snap *Snap) MapAndMount(mountPoint string, flags uintptr, args ...string) error {
-	_, err := snap.Map(args...)
-	if err != nil {
-		return err
-	}
-	return snap.Mount(mountPoint, flags)
+func (snap *Snapshot) MapAndMount(mountPoint, fs string, flags uintptr, args ...string) error {
+	return devMapAndMount(snap, mountPoint, fs, flags, func() (string, error) { return snap.Map(args...) })
 }
 
-func (snap *Snap) Unmap() error {
-	// TODO
-	return nil
+func (snap *Snapshot) Unmap() error {
+	return devUnmap(snap)
 }
 
-func (snap *Snap) Unmount(mountPoint string) error {
-	// TODO
-	return nil
+func (snap *Snapshot) Unmount(mountPoint string) error {
+	return devUnmount(snap, mountPoint)
 }
 
-func (snap *Snap) UnmountAndUnmap(mountPoint string) error {
-	// TODO
-	return nil
+func (snap *Snapshot) UnmountAndUnmap(mountPoint string) error {
+	return devUnmountAndUnmap(snap, mountPoint)
 }
 
-func (snap *Snap) Remove() error {
-	//TODO
-	return nil
+func (snap *Snapshot) Remove() error {
+	return devRemove(snap)
+}
+
+func (snap *Snapshot) FileSystem() (string, error) {
+	return devFileSystem(snap)
 }

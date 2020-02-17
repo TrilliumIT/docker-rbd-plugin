@@ -1,7 +1,10 @@
 package rbd
 
 import (
+	"encoding/json"
 	"errors"
+	"strings"
+	"time"
 )
 
 // Dev is an rbd device, a snapshot or an image
@@ -10,14 +13,20 @@ type Dev interface {
 	ImageName() string
 	Name() string
 	Pool() *Pool
+	Info() (*DevInfo, error)
 	IsMountedAt(string) (bool, error)
 	Map(...string) (string, error)
-	Mount(string, uintptr) error
+	Mount(string, string, uintptr) error
 	Unmount(string) error
 	Unmap() error
-	MapAndMount(string, uintptr, ...string) error
+	MapAndMount(string, string, uintptr, ...string) error
 	UnmountAndUnmap(string) error
 	Remove() error
+	FileSystem() (string, error)
+}
+
+func devFullName(d Dev) string {
+	return d.Pool().Name() + "/" + d.ImageName()
 }
 
 func device(d Dev) (string, error) {
@@ -31,6 +40,24 @@ func device(d Dev) (string, error) {
 		}
 	}
 	return "", nil
+}
+
+var ErrNotMapped = errors.New("not mapped")
+
+func mustDevice(d Dev) (string, error) {
+	blk, err := device(d)
+	if err == nil && blk == "" {
+		err = ErrNotMapped
+	}
+	return blk, err
+}
+
+func devFileSystem(d Dev) (string, error) {
+	blk, err := mustDevice(d)
+	if err != nil {
+		return blk, err
+	}
+	return getFs(blk)
 }
 
 func devIsMountedAt(d Dev, mountPoint string) (bool, error) {
@@ -57,8 +84,8 @@ func devMap(d Dev, args ...string) (string, error) {
 	if err != nil || nbd != "" {
 		return nbd, err
 	}
-	args = append([]string{"nbd", "map", "--image", d.ImageName()}, args...)
-	args = d.Pool().cmdArgs(args...)
+	args = append([]string{"nbd", "map"}, args...)
+	args = devCmdArgs(d, args...)
 	return cmdOut(mapErrors, args...)
 }
 
@@ -67,29 +94,24 @@ func devCmdArgs(d Dev, args ...string) []string {
 	return d.Pool().cmdArgs(args...)
 }
 
-func devMapAndMount(d Dev, mountPoint string, flags uintptr, mapF func() (string, error)) error {
-	err := d.Mount(mountPoint, flags)
+func devMapAndMount(d Dev, mountPoint, fs string, flags uintptr, mapF func() (string, error)) error {
+	err := d.Mount(mountPoint, fs, flags)
 	if errors.Is(err, ErrNotMapped) {
 		blk, err := mapF()
 		if err != nil {
 			return err
 		}
-		return mount(blk, mountPoint, flags)
+		return mount(blk, mountPoint, fs, flags)
 	}
 	return err
 }
 
-var ErrNotMapped = errors.New("image not mapped")
-
-func devMount(d Dev, mountPoint string, flags uintptr) error {
-	blk, err := device(d)
+func devMount(d Dev, mountPoint, fs string, flags uintptr) error {
+	blk, err := mustDevice(d)
 	if err != nil {
 		return err
 	}
-	if blk == "" {
-		return ErrNotMapped
-	}
-	return mount(blk, mountPoint, flags)
+	return mount(blk, mountPoint, fs, flags)
 }
 
 func devUnmount(d Dev, mountPoint string) error {
@@ -133,5 +155,40 @@ func devUnmap(d Dev) error {
 }
 
 func devRemove(d Dev) error {
-	return cmdRun(nil, devCmdArgs(d, "remove")...)
+	return cmdRun(nil, devCmdArgs(d, "remove", "--no-progress")...)
+}
+
+type DevInfo struct {
+	Name            string          `json:"name"`
+	Size            int64           `json:"size"`
+	Objects         int             `json:"objects"`
+	Order           int             `json:"order"`
+	ObjectSize      int             `json:"object_size"`
+	BlockNamePrefix string          `json:"block_name_prefix"`
+	Format          int             `json:"format"`
+	Features        []string        `json:"features"`
+	Flags           []interface{}   `json:"flags"`
+	CreateTimestamp CreateTimestamp `json:"create_timestamp"`
+	Protected       bool            `json:"protected,string"`
+}
+
+type CreateTimestamp time.Time
+
+func (j *CreateTimestamp) UnmarshalJSON(b []byte) error {
+	s := strings.Trim(string(b), "\"")
+	t, err := time.ParseInLocation(time.ANSIC, s, time.Local)
+	if err != nil {
+		return err
+	}
+	*j = CreateTimestamp(t)
+	return nil
+}
+
+func (j CreateTimestamp) MarshalJSON() ([]byte, error) {
+	return json.Marshal(time.Time(j).Format(time.ANSIC))
+}
+
+func devInfo(d Dev) (*DevInfo, error) {
+	i := &DevInfo{}
+	return i, cmdJSON(i, imageErrs, devCmdArgs(d)...)
 }

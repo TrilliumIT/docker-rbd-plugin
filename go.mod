@@ -7,6 +7,7 @@ require (
 	github.com/coreos/go-systemd v0.0.0-00010101000000-000000000000
 	github.com/docker/go-connections v0.4.0 // indirect
 	github.com/docker/go-plugins-helpers v0.0.0-20200102110956-c9a8a2d92ccc
+	github.com/google/martian v2.1.0+incompatible
 	github.com/o1egl/fwencoder v0.0.1
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/sirupsen/logrus v1.4.2

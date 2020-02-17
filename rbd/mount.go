@@ -11,10 +11,41 @@ import (
 	"syscall"
 )
 
+type MountInfo struct {
+	Id             int
+	ParentId       int
+	StDev          stDev
+	Root           string
+	MountPoint     string
+	MountOptions   []string
+	OptionalFields []optionalField
+	FilesystemType string
+	Source         string
+	SuperOptions   []string
+	// extra parsed options
+	Shared int
+	Master int
+	Parent *MountInfo
+}
+
+type stDev struct {
+	major int
+	minor int
+}
+
+type optionalField struct {
+	tag   string
+	value int
+}
+
 var ErrMountedElsewhere = errors.New("device is still mounted in another location")
 
+func getMounts(blk string) ([]*MountInfo, error) {
+	return getMountInfoForDevFromFile("/proc/self/mountinfo", blk)
+}
+
 func isMountedAt(blk, mountPoint string) (bool, error) {
-	mounts, err := getMountInfoForDevFromFile("/proc/self/mounts", blk)
+	mounts, err := getMounts(blk)
 	if err != nil {
 		return false, err
 	}
@@ -26,16 +57,25 @@ func isMountedAt(blk, mountPoint string) (bool, error) {
 	return false, nil
 }
 
-func mount(blk, mountPoint string, flags uintptr) error {
+func getFs(blk string) (string, error) {
+	out, err := exec.Command("deviceid", "-s", "TYPE", "-o", "value", blk).Output()
+	if err != nil {
+		return "", fmt.Errorf("error determining filesystem on %v: %w", blk, err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func mount(blk, mountPoint, fs string, flags uintptr) error {
 	if mounted, err := isMountedAt(blk, mountPoint); err != nil || mounted {
 		return err
 	}
 
-	fs := ""
-	if out, err := exec.Command("deviceid", "-s", "TYPE", "-o", "value", blk).Output(); err != nil {
-		return fmt.Errorf("error determining filesystem on %v: %w", blk, err)
-	} else {
-		fs = strings.TrimSpace(string(out))
+	if fs == "" {
+		var err error
+		fs, err = getFs(blk)
+		if err != nil {
+			return err
+		}
 	}
 
 	if err := os.MkdirAll(mountPoint, 0755); err != nil {
@@ -70,7 +110,7 @@ func isMountedElsewhere(blk, mountpoint string) error {
 		return fmt.Errorf("error determining my mnt namespace: %w", err)
 	}
 
-	myMounts, err := getMountInfoForDevFromFile("/proc/self/mountinfo", blk)
+	myMounts, err := getMounts(blk)
 	if err != nil {
 		return err
 	}
@@ -161,33 +201,6 @@ func getMountInfoForDevFromFile(MountInfoFile, blk string) ([]*MountInfo, error)
 		m.Parent = parent
 	}
 	return mounts, scanner.Err()
-}
-
-type MountInfo struct {
-	Id             int
-	ParentId       int
-	StDev          stDev
-	Root           string
-	MountPoint     string
-	MountOptions   []string
-	OptionalFields []optionalField
-	FilesystemType string
-	Source         string
-	SuperOptions   []string
-	// extra parsed options
-	Shared int
-	Master int
-	Parent *MountInfo
-}
-
-type stDev struct {
-	major int
-	minor int
-}
-
-type optionalField struct {
-	tag   string
-	value int
 }
 
 func parseMountinfoLine(line string) (*MountInfo, error) {

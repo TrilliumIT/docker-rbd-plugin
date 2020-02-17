@@ -17,8 +17,8 @@ func GetPool(name string) *Pool {
 	return &Pool{name}
 }
 
-// ErrPoolDoesNotExist is returned if the rbd pool does not exist
-var ErrPoolDoesNotExist = errors.New("pool does not exist")
+// ErrDoesNotExist is returned if the pool, image or snapshot does not exist
+var ErrDoesNotExist = errors.New("does not exist")
 
 func (pool *Pool) cmdArgs(args ...string) []string {
 	return append([]string{"--pool", pool.name}, args...)
@@ -28,13 +28,13 @@ func (pool *Pool) getImage(name string) *Image {
 	return getImage(pool, name)
 }
 
-var poolErrs = map[int]error{2: ErrPoolDoesNotExist}
+var poolErrs = map[int]error{2: ErrDoesNotExist}
 
 // Images returns the rbd images
 func (pool *Pool) Images() ([]*Image, error) {
 	imgNames := []string{}
 	err := cmdJSON(&imgNames, poolErrs, pool.cmdArgs("list")...)
-	images := make([]*Image, len(imgNames), len(imgNames))
+	images := make([]*Image, 0, len(imgNames))
 	for _, n := range imgNames {
 		images = append(images, pool.getImage(n))
 	}
@@ -56,41 +56,39 @@ func (pool *Pool) Devices() ([]Dev, error) {
 			images[d.Image] = pool.getImage(d.Image)
 		}
 	}
-	retDevs := make([]Dev, len(devs), len(devs))
+	retDevs := make([]Dev, 0, len(devs))
 	for _, d := range devs {
 		image := images[d.Image]
 		if d.Snapshot == "" {
 			retDevs = append(retDevs, image)
 		} else {
-			retDevs = append(retDevs, image.getSnap(d.Snapshot))
+			retDevs = append(retDevs, image.getSnapshot(d.Snapshot))
 		}
 	}
 	return retDevs, err
 }
 
-var imageErrs = map[int]error{2: ErrPoolDoesNotExist}
+var imageErrs = map[int]error{2: ErrDoesNotExist}
 
 func (pool *Pool) GetImage(name string) (*Image, error) {
-	err := cmdRun(poolErrs, pool.cmdArgs("info", name)...)
-	if err != nil {
-		return nil, err
-	}
-	return pool.getImage(name), err
+	img := pool.getImage(name)
+	_, err := img.Info()
+	return img, err
 }
 
-var ErrImageAlreadyExists = errors.New("image already exists")
+var ErrAlreadyExists = errors.New("image already exists")
 
-var poolCreateErrs = map[int]error{
-	17: ErrImageAlreadyExists,
+var createErrs = map[int]error{
+	17: ErrAlreadyExists,
 }
 
 func (pool *Pool) CreateImage(name string, size string, args ...string) (*Image, error) {
 	args = append([]string{"--image", name, "--size", size}, args...)
-	err := cmdRun(poolCreateErrs, pool.cmdArgs(args...)...)
-	if err != nil {
+	err := cmdRun(createErrs, pool.cmdArgs(args...)...)
+	if err != nil && !errors.Is(err, ErrAlreadyExists) {
 		return nil, err
 	}
-	return pool.getImage(name), nil
+	return pool.getImage(name), err
 }
 
 func (pool *Pool) CreateImageWithFileSystem(name, size, fileSystem string, args ...string) (*Image, error) {
