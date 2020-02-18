@@ -30,5 +30,5 @@ func snap(prefix string, includeTS, onlyMapped bool, patterns ...string) error {
 		return nil
 	}
 
-	return loop(snapF, log, patterns...)
+	return loopImgs(snapF, log, patterns...)
 }

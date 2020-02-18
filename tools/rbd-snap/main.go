@@ -103,7 +103,3 @@ func main() {
 		log.Fatal(err)
 	}
 }
-
-func prune(prefix string, pruneAge time.Duration, pattern ...string) error {
-	return nil
-}

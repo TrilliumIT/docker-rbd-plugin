@@ -97,5 +97,5 @@ func mount(prefix, mountPointDir, fileSystem string, patterns ...string) error {
 		return nil
 	}
 
-	return loop(mountF, log.NewEntry(log.StandardLogger()), patterns...)
+	return loopImgs(mountF, log.NewEntry(log.StandardLogger()), patterns...)
 }
