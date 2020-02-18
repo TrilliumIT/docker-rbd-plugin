@@ -22,6 +22,7 @@ type Dev interface {
 	Unmap() error
 	MapAndMount(string, string, uintptr, string, ...string) error
 	UnmountAndUnmap(string) error
+	Device() (string, error)
 	Remove() error
 	FileSystem() (string, error)
 	cmdArgs(...string) []string

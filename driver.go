@@ -3,8 +3,10 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/TrilliumIT/docker-rbd-plugin/rbd"
 	"github.com/docker/go-plugins-helpers/volume"
@@ -227,4 +229,49 @@ func (rd *RbdDriver) Unmount(req *volume.UnmountRequest) error {
 func (rd *RbdDriver) Capabilities() *volume.CapabilitiesResponse {
 	log.Debug("capabilities")
 	return &volume.CapabilitiesResponse{Capabilities: volume.Capability{Scope: "global"}}
+}
+
+func (rd *RbdDriver) reap(olderThan time.Time) {
+	mapped, err := rd.pool.MappedImages()
+	if err != nil {
+		log.WithError(err).Error("error getting mapped images for reaping")
+		return
+	}
+	for _, img := range mapped {
+		go func(img *rbd.Image) {
+			lock(img.FullName())
+			defer unlock(img.FullName())
+			log := log.WithField("image", img.FullName())
+			blk, err := img.Device()
+			if err != nil {
+				log.WithError(err).Error("error getting device")
+			}
+			if blk == "" {
+				return
+			}
+			log = log.WithField("blk", blk)
+			blkStats, err := os.Stat(blk)
+			if err != nil {
+				log.WithError(err).Error("error modification time for blk")
+				return
+			}
+			if blkStats.ModTime().IsZero() {
+				log.Error("mod time is zero")
+				return
+			}
+			if olderThan.Before(blkStats.ModTime()) {
+				return
+			}
+			mp := rd.mountPoint(img)
+			err = img.UnmountAndUnmap(mp)
+			if errors.Is(err, rbd.ErrMountedElsewhere) {
+				return
+			}
+			if err != nil {
+				log.WithError(err).Error("error in reap unmount")
+				return
+			}
+			log.Info("reaped mapped image")
+		}(img)
+	}
 }

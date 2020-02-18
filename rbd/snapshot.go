@@ -46,6 +46,11 @@ func (snap *Snapshot) Pool() *Pool {
 	return snap.image.Pool()
 }
 
+// Device returns the nbd device that this image is mapped to
+func (snap *Snapshot) Device() (string, error) {
+	return device(snap)
+}
+
 func (snap *Snapshot) cmdArgs(args ...string) []string {
 	args = append([]string{"--snap", snap.Name()}, args...)
 	return snap.Image().cmdArgs(args...)

@@ -43,6 +43,28 @@ func (pool *Pool) Images() ([]*Image, error) {
 	return images, err
 }
 
+func (pool *Pool) MappedImages() ([]*Image, error) {
+	mappedNBDs, err := mappedNBDs()
+	if err != nil {
+		return nil, err
+	}
+	mappedImages := []*Image{}
+	for _, nbd := range mappedNBDs {
+		if nbd.Pool == pool.Name() && nbd.Snapshot == "-" {
+			mappedImages = append(mappedImages, pool.getImage(nbd.Name))
+			/*
+				var mountTime time.Time
+				if blkDevStat, err := os.Stat(nbd.Device); err != nil {
+					mountTime = blkDevStat.ModTime()
+				}
+				mappedImages = append(mappedImages, &MappedImage{
+					pool.getImage(nbd.Name), nbd.Device, nbd.Pid, mountTime})
+			*/
+		}
+	}
+	return mappedImages, nil
+}
+
 type devList struct {
 	Image    string `json:"image"`
 	Snapshot string `json:"snapshot"`

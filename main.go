@@ -6,6 +6,7 @@ import (
 	"os/signal"
 	"os/user"
 	"syscall"
+	"time"
 
 	"github.com/coreos/go-systemd/activation"
 	"github.com/docker/go-plugins-helpers/volume"
@@ -50,6 +51,15 @@ func main() {
 			Usage:  "Mountpoint for rbd images.",
 			EnvVar: "RBD_VOLUME_DIR",
 		},
+		cli.DurationFlag{
+			Name:  "reap",
+			Value: time.Second * 30,
+			// this will scan every 5m images that are mounted in mountpoint, but nowhere else,
+			// or images that are not mounted anywhere, and unmap them, if the modification time of
+			// the block device is older than the duration here (to prevent unmapping something
+			// an admistrator just mapped manually
+			Usage: "reap mapped images (0 to disable)",
+		},
 	}
 	app.Action = Run
 
@@ -93,6 +103,16 @@ func Run(ctx *cli.Context) error {
 
 	if len(listeners) > 1 {
 		log.Warn("driver does not support multiple sockets")
+	}
+
+	reapDur := ctx.Duration("reap")
+	if reapDur != 0 {
+		ticker := time.NewTicker(reapDur)
+		go func() {
+			for t := range ticker.C {
+				d.reap(t.Add(-reapDur))
+			}
+		}()
 	}
 
 	l := listeners[0]

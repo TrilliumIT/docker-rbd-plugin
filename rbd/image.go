@@ -167,6 +167,11 @@ func (img *Image) CreateConsistentSnapshot(name string, onlyIfMapped bool) (*Sna
 	return img.CreateSnapshot(name)
 }
 
+// Device returns the nbd device that this image is mapped to
+func (img *Image) Device() (string, error) {
+	return device(img)
+}
+
 // Snapshots returns all existing snapshots of the image
 func (img *Image) Snapshots() ([]*Snapshot, error) {
 	args := img.cmdArgs("snap", "list")
