@@ -23,6 +23,7 @@ type Dev interface {
 	UnmountAndUnmap(string) error
 	Remove() error
 	FileSystem() (string, error)
+	cmdArgs(...string) []string
 }
 
 func devFullName(d Dev) string {
@@ -92,13 +93,8 @@ func devMap(d Dev, args ...string) (string, error) {
 		return nbd, err
 	}
 	args = append([]string{"nbd", "map"}, args...)
-	args = devCmdArgs(d, args...)
+	args = d.cmdArgs(args...)
 	return cmdOut(mapErrors, args...)
-}
-
-func devCmdArgs(d Dev, args ...string) []string {
-	args = append([]string{"--image", d.ImageName()}, args...)
-	return d.Pool().cmdArgs(args...)
 }
 
 func devMapAndMount(d Dev, mountPoint, fs string, flags uintptr, data string, mapF func() (string, error)) error {
@@ -161,10 +157,6 @@ func devUnmap(d Dev) error {
 	return unmap(blk)
 }
 
-func devRemove(d Dev) error {
-	return cmdRun(nil, devCmdArgs(d, "remove", "--no-progress")...)
-}
-
 type DevInfo struct {
 	Name            string          `json:"name"`
 	Size            int64           `json:"size"`
@@ -197,5 +189,5 @@ func (j CreateTimestamp) MarshalJSON() ([]byte, error) {
 
 func devInfo(d Dev) (*DevInfo, error) {
 	i := &DevInfo{}
-	return i, cmdJSON(i, imageErrs, devCmdArgs(d)...)
+	return i, cmdJSON(i, imageErrs, d.cmdArgs("info")...)
 }

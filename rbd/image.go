@@ -34,6 +34,11 @@ func (img *Image) Pool() *Pool {
 	return img.pool
 }
 
+func (img *Image) cmdArgs(args ...string) []string {
+	args = append([]string{"--image", img.Name()}, args...)
+	return img.Pool().cmdArgs(args...)
+}
+
 func (img *Image) IsMountedAt(mountPoint string) (bool, error) {
 	return devIsMountedAt(img, mountPoint)
 }
@@ -61,13 +66,13 @@ func (img *Image) MapExclusive(args ...string) (string, error) {
 
 func (img *Image) EnableFeatures(feature ...string) error {
 	args := append([]string{"feature", "enable"}, feature...)
-	args = devCmdArgs(img, args...)
+	args = img.cmdArgs(args...)
 	return cmdRun(nil, args...)
 }
 
 func (img *Image) DisableFeatures(feature ...string) error {
 	args := append([]string{"feature", "disable"}, feature...)
-	args = devCmdArgs(img, args...)
+	args = img.cmdArgs(args...)
 	return cmdRun(nil, args...)
 }
 
@@ -96,7 +101,7 @@ func (img *Image) UnmountAndUnmap(mountPoint string) error {
 }
 
 func (img *Image) Remove() error {
-	return devRemove(img)
+	return cmdRun(nil, img.cmdArgs("remove", "--no-progress")...)
 }
 
 func (img *Image) getSnapshot(name string) *Snapshot {
@@ -110,7 +115,7 @@ func (img *Image) GetSnapshot(name string) (*Snapshot, error) {
 }
 
 func (img *Image) CreateSnapshot(name string) (*Snapshot, error) {
-	args := devCmdArgs(img, "snap", "create", "--snap", name)
+	args := img.cmdArgs("snap", "create", "--snap", name)
 	err := cmdRun(createErrs, args...)
 	if err != nil && !errors.Is(err, ErrAlreadyExists) {
 		return nil, err
@@ -137,7 +142,7 @@ func (img *Image) CreateConsistentSnapshot(name string, onlyIfMapped bool) (*Sna
 }
 
 func (img *Image) Snapshots() ([]*Snapshot, error) {
-	args := devCmdArgs(img, "snap", "list")
+	args := img.cmdArgs("snap", "list")
 	snaps := []*snapshotListEntry{}
 	err := cmdJSON(&snaps, nil, args...)
 	if err != nil {

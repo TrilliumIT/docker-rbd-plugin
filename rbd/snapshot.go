@@ -42,6 +42,11 @@ func (snap *Snapshot) Pool() *Pool {
 	return snap.image.Pool()
 }
 
+func (snap *Snapshot) cmdArgs(args ...string) []string {
+	args = append([]string{"--snap", snap.Name()}, args...)
+	return snap.Image().cmdArgs(args...)
+}
+
 func (snap *Snapshot) Info() (*DevInfo, error) {
 	return devInfo(snap)
 }
@@ -77,7 +82,7 @@ func (snap *Snapshot) UnmountAndUnmap(mountPoint string) error {
 }
 
 func (snap *Snapshot) Remove() error {
-	return devRemove(snap)
+	return cmdRun(nil, snap.cmdArgs("snap", "remove", "--no-progress")...)
 }
 
 func (snap *Snapshot) FileSystem() (string, error) {
