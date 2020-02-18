@@ -61,8 +61,11 @@ func isMountedAt(blk, mountPoint string) (bool, error) {
 }
 
 func getFs(blk string) (string, error) {
-	out, err := exec.Command("deviceid", "-s", "TYPE", "-o", "value", blk).Output()
+	out, err := exec.Command("blkid", "-c", "/dev/null", "-p", "-s", "TYPE", "-o", "value", blk).Output()
 	if err != nil {
+		if exitErr, isExitErr := err.(*exec.ExitError); isExitErr {
+			return "", fmt.Errorf("error determining filesystem on %v: %v: %w", blk, string(exitErr.Stderr), err)
+		}
 		return "", fmt.Errorf("error determining filesystem on %v: %w", blk, err)
 	}
 	return strings.TrimSpace(string(out)), nil

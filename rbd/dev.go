@@ -3,6 +3,7 @@ package rbd
 import (
 	"encoding/json"
 	"errors"
+	"os/exec"
 	"strings"
 	"time"
 )
@@ -83,9 +84,17 @@ var ErrExclusiveLockNotEnabled = errors.New("exclusive-lock not enabled")
 // ErrExclusiveLockTaken is returned when this client cannot get an exclusive-lock
 var ErrExclusiveLockTaken = errors.New("exclusive-lock is held by another client")
 
-var mapErrors = map[int]error{
-	22: ErrExclusiveLockNotEnabled,
-	30: ErrExclusiveLockTaken,
+func devMapErrors(err *exec.ExitError) error {
+	if err.ExitCode() == 22 {
+		stdErr := string(err.Stderr)
+		if strings.Contains(stdErr, "failed to request exclusive lock: (30) Read-only file system") {
+			return ErrExclusiveLockTaken
+		}
+		if strings.Contains(stdErr, "exclusive-lock feature is not enabled") {
+			return ErrExclusiveLockNotEnabled
+		}
+	}
+	return err
 }
 
 func devMap(d Dev, args ...string) (string, error) {
@@ -95,7 +104,7 @@ func devMap(d Dev, args ...string) (string, error) {
 	}
 	args = append([]string{"nbd", "map"}, args...)
 	args = d.cmdArgs(args...)
-	return cmdOut(mapErrors, args...)
+	return cmdOut(devMapErrors, args...)
 }
 
 func devMapAndMount(d Dev, mountPoint, fs string, flags uintptr, data string, mapF func() (string, error)) error {
@@ -144,9 +153,9 @@ func devUnmountAndUnmap(d Dev, mountPoint string) error {
 // ErrDeviceBusy is returned if the device is busy
 var ErrDeviceBusy = errors.New("device busy")
 
-var unmapErrors = map[int]error{
+var unmapErrors = exitCodeToErrMap(map[int]error{
 	16: ErrDeviceBusy,
-}
+})
 
 func unmap(blk string) error {
 	return cmdRun(unmapErrors, "nbd", "unmap", blk)

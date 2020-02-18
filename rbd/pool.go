@@ -30,7 +30,7 @@ func (pool *Pool) getImage(name string) *Image {
 	return getImage(pool, name)
 }
 
-var poolErrs = map[int]error{2: ErrDoesNotExist}
+var poolErrs = exitCodeToErrMap(map[int]error{2: ErrDoesNotExist})
 
 // Images returns the rbd images
 func (pool *Pool) Images() ([]*Image, error) {
@@ -70,7 +70,7 @@ func (pool *Pool) Devices() ([]Dev, error) {
 	return retDevs, err
 }
 
-var imageErrs = map[int]error{2: ErrDoesNotExist}
+var imageErrs = exitCodeToErrMap(map[int]error{2: ErrDoesNotExist})
 
 // GetImage gets an image in the pool
 func (pool *Pool) GetImage(name string) (*Image, error) {
@@ -82,9 +82,9 @@ func (pool *Pool) GetImage(name string) (*Image, error) {
 // ErrAlreadyExists is returned if creating an image that already exists
 var ErrAlreadyExists = errors.New("image already exists")
 
-var createErrs = map[int]error{
+var createErrs = exitCodeToErrMap(map[int]error{
 	17: ErrAlreadyExists,
-}
+})
 
 // CreateImage creates an image in the pool
 func (pool *Pool) CreateImage(name string, size string, args ...string) (*Image, error) {

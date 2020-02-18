@@ -74,11 +74,15 @@ func (img *Image) MapExclusive(args ...string) (string, error) {
 	return blk, err
 }
 
+// ErrFeatureAlreadyEnabled is returned when enabling a feature that is already enabled
+var ErrFeatureAlreadyEnabled = errors.New("feature already enabled")
+
+var featureEnableErrMap = exitCodeToErrMap(map[int]error{22: ErrFeatureAlreadyEnabled})
+
 // EnableFeatures enables features
 func (img *Image) EnableFeatures(feature ...string) error {
-	args := append([]string{"feature", "enable"}, feature...)
-	args = img.cmdArgs(args...)
-	return cmdRun(nil, args...)
+	args := append([]string{"feature", "enable"}, img.cmdArgs(feature...)...)
+	return cmdRun(featureEnableErrMap, args...)
 }
 
 // DisableFeatures disables features
@@ -181,4 +185,16 @@ func (img *Image) Snapshots() ([]*Snapshot, error) {
 // FileSystem returns the filesystem of the image
 func (img *Image) FileSystem() (string, error) {
 	return devFileSystem(img)
+}
+
+// LockInfo is an rbd lock
+type LockInfo struct {
+	Locker  string
+	address string
+}
+
+func (img *Image) GetLocks() (map[string]*LockInfo, error) {
+	args := img.cmdArgs("lock", "list")
+	locks := make(map[string]*LockInfo)
+	return locks, cmdJSON(&locks, nil, args...)
 }

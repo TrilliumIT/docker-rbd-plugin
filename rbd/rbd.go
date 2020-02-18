@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"strings"
 
 	"github.com/o1egl/fwencoder"
 )
@@ -21,7 +22,18 @@ func init() {
 	}
 }
 
-func cmdJSON(v interface{}, errMap map[int]error, args ...string) error {
+type cmdErrMap func(*exec.ExitError) error
+
+func exitCodeToErrMap(m map[int]error) cmdErrMap {
+	return func(err *exec.ExitError) error {
+		if rErr, ok := m[err.ExitCode()]; ok {
+			return rErr
+		}
+		return err
+	}
+}
+
+func cmdJSON(v interface{}, errMap cmdErrMap, args ...string) error {
 	jsonDecode := func(v interface{}) func(io.Reader) error {
 		return func(r io.Reader) error {
 			return json.NewDecoder(r).Decode(v)
@@ -32,7 +44,7 @@ func cmdJSON(v interface{}, errMap map[int]error, args ...string) error {
 	return cmdMapErr(err, errMap)
 }
 
-func cmdColumns(v interface{}, errMap map[int]error, args ...string) error {
+func cmdColumns(v interface{}, errMap cmdErrMap, args ...string) error {
 	colDecode := func(v interface{}) func(io.Reader) error {
 		return func(r io.Reader) error {
 			return fwencoder.UnmarshalReader(r, v)
@@ -43,12 +55,12 @@ func cmdColumns(v interface{}, errMap map[int]error, args ...string) error {
 	return cmdMapErr(err, errMap)
 }
 
-func cmdOut(errMap map[int]error, args ...string) (string, error) {
+func cmdOut(errMap cmdErrMap, args ...string) (string, error) {
 	out, err := exec.Command(rbdBin, args...).Output()
-	return string(out), cmdMapErr(err, errMap)
+	return strings.TrimSpace(string(out)), cmdMapErr(err, errMap)
 }
 
-func cmdRun(errMap map[int]error, args ...string) error {
+func cmdRun(errMap cmdErrMap, args ...string) error {
 	err := exec.Command(rbdBin, args...).Run()
 	return cmdMapErr(err, errMap)
 }
@@ -71,11 +83,9 @@ func cmdDecode(decode func(io.Reader) error, name string, arg ...string) error {
 	return nil
 }
 
-func cmdMapErr(err error, errMap map[int]error) error {
+func cmdMapErr(err error, errMap func(*exec.ExitError) error) error {
 	if exitErr, isExitErr := err.(*exec.ExitError); isExitErr {
-		if mappedErr, ok := errMap[exitErr.ExitCode()]; ok {
-			return mappedErr
-		}
+		return errMap(exitErr)
 	}
 	return err
 }
