@@ -63,11 +63,11 @@ func main() {
 func Run(ctx *cli.Context) error {
 	u, err := user.Current()
 	if err != nil {
-		return fmt.Errorf("Error trying to get the current user.")
+		return fmt.Errorf("error getting the current user")
 	}
 
 	if u.Uid != "0" {
-		return fmt.Errorf("Error trying to get the current user.")
+		return fmt.Errorf("user is not root")
 	}
 
 	d, err := NewRbdDriver(ctx.String("pool"), ctx.String("default-size"), ctx.String("default-filesystem"), ctx.String("mountpoint"))

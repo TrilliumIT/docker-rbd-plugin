@@ -11,9 +11,10 @@ import (
 	"syscall"
 )
 
+// MountInfo is information about a mount from /proc/mountinfo
 type MountInfo struct {
-	Id             int
-	ParentId       int
+	ID             int
+	ParentID       int
 	StDev          stDev
 	Root           string
 	MountPoint     string
@@ -38,6 +39,7 @@ type optionalField struct {
 	value int
 }
 
+// ErrMountedElsewhere is returned when attempting to unmap a device that is still mounted
 var ErrMountedElsewhere = errors.New("device is still mounted in another location")
 
 func getMounts(blk string) ([]*MountInfo, error) {
@@ -191,11 +193,11 @@ func getMountInfoForDevFromFile(MountInfoFile, blk string) ([]*MountInfo, error)
 		if m.Source == blk || blk == "" {
 			mounts = append(mounts, m)
 		} else {
-			otherMounts[m.Id] = m
+			otherMounts[m.ID] = m
 		}
 	}
 	for _, m := range mounts {
-		parent, ok := otherMounts[m.ParentId]
+		parent, ok := otherMounts[m.ParentID]
 		if !ok {
 			return mounts, fmt.Errorf("parent mount not found")
 		}
@@ -247,12 +249,12 @@ func parseMountinfoLine(line string) (*MountInfo, error) {
 	var err error
 	m := &MountInfo{}
 
-	m.Id, err = scanIntFor("id")
+	m.ID, err = scanIntFor("id")
 	if err != nil {
 		return m, err
 	}
 
-	m.ParentId, err = scanIntFor("parent id")
+	m.ParentID, err = scanIntFor("parent id")
 	if err != nil {
 		return m, err
 	}

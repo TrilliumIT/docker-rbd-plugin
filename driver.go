@@ -188,7 +188,7 @@ func (rd *RbdDriver) Mount(req *volume.MountRequest) (*volume.MountResponse, err
 	}
 
 	mp := rd.mountPoint(img)
-	err = img.MapAndMountExclusive(mp, syscall.MS_NOATIME)
+	err = img.MapAndMountExclusive(mp, "", syscall.MS_NOATIME, "")
 	if err != nil {
 		log.WithError(err).Error("error in driver mount")
 		return nil, fmt.Errorf("error in driver mount: %w", err)

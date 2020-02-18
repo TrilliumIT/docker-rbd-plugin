@@ -50,6 +50,7 @@ func device(d Dev) (string, error) {
 	return "", nil
 }
 
+// ErrNotMapped is returned if a rbd is not mapped
 var ErrNotMapped = errors.New("not mapped")
 
 func mustDevice(d Dev) (string, error) {
@@ -76,10 +77,10 @@ func devIsMountedAt(d Dev, mountPoint string) (bool, error) {
 	return isMountedAt(blk, mountPoint)
 }
 
-// ErrErrExclusiveLockNotEnabled is returned when an rbd volume does not have exclusive-locks feature enabled
+// ErrExclusiveLockNotEnabled is returned when an rbd volume does not have exclusive-locks feature enabled
 var ErrExclusiveLockNotEnabled = errors.New("exclusive-lock not enabled")
 
-// EErrExclusiveLockTaken is returned when this client cannot get an exclusive-lock
+// ErrExclusiveLockTaken is returned when this client cannot get an exclusive-lock
 var ErrExclusiveLockTaken = errors.New("exclusive-lock is held by another client")
 
 var mapErrors = map[int]error{
@@ -140,7 +141,9 @@ func devUnmountAndUnmap(d Dev, mountPoint string) error {
 	return unmap(blk)
 }
 
+// ErrDeviceBusy is returned if the device is busy
 var ErrDeviceBusy = errors.New("device busy")
+
 var unmapErrors = map[int]error{
 	16: ErrDeviceBusy,
 }
@@ -157,6 +160,7 @@ func devUnmap(d Dev) error {
 	return unmap(blk)
 }
 
+// DevInfo contains information about the image or snapshot
 type DevInfo struct {
 	Name            string          `json:"name"`
 	Size            int64           `json:"size"`
@@ -171,8 +175,10 @@ type DevInfo struct {
 	Protected       bool            `json:"protected,string"`
 }
 
+// CreateTimestamp is the creation timestamp for an image or snapshot
 type CreateTimestamp time.Time
 
+// UnmarshalJSON unmarshals CreateTimestamp
 func (j *CreateTimestamp) UnmarshalJSON(b []byte) error {
 	s := strings.Trim(string(b), "\"")
 	t, err := time.ParseInLocation(time.ANSIC, s, time.Local)
@@ -183,6 +189,7 @@ func (j *CreateTimestamp) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// MarshalJSON marshals CreateTimestamp
 func (j CreateTimestamp) MarshalJSON() ([]byte, error) {
 	return json.Marshal(time.Time(j).Format(time.ANSIC))
 }

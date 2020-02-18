@@ -9,10 +9,12 @@ type Pool struct {
 	name string
 }
 
+// Name is the pool name
 func (pool *Pool) Name() string {
 	return pool.name
 }
 
+// GetPool gets a pool object (does not verify pool exists)
 func GetPool(name string) *Pool {
 	return &Pool{name}
 }
@@ -70,18 +72,21 @@ func (pool *Pool) Devices() ([]Dev, error) {
 
 var imageErrs = map[int]error{2: ErrDoesNotExist}
 
+// GetImage gets an image in the pool
 func (pool *Pool) GetImage(name string) (*Image, error) {
 	img := pool.getImage(name)
 	_, err := img.Info()
 	return img, err
 }
 
+// ErrAlreadyExists is returned if creating an image that already exists
 var ErrAlreadyExists = errors.New("image already exists")
 
 var createErrs = map[int]error{
 	17: ErrAlreadyExists,
 }
 
+// CreateImage creates an image in the pool
 func (pool *Pool) CreateImage(name string, size string, args ...string) (*Image, error) {
 	args = append([]string{"--image", name, "--size", size}, args...)
 	err := cmdRun(createErrs, pool.cmdArgs(args...)...)
@@ -91,6 +96,7 @@ func (pool *Pool) CreateImage(name string, size string, args ...string) (*Image,
 	return pool.getImage(name), err
 }
 
+// CreateImageWithFileSystem creates and formats an image
 func (pool *Pool) CreateImageWithFileSystem(name, size, fileSystem string, args ...string) (*Image, error) {
 	img, err := pool.CreateImage(name, size, args...)
 	if err != nil {

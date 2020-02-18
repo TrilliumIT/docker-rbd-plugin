@@ -10,6 +10,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// ErrNoSnapshots is returned if there are no snapshots
 var ErrNoSnapshots = errors.New("no snapshots")
 
 func mount(prefix, mountPointDir, fileSystem string, patterns ...string) error {
