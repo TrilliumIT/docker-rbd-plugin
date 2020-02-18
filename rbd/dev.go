@@ -16,10 +16,10 @@ type Dev interface {
 	Info() (*DevInfo, error)
 	IsMountedAt(string) (bool, error)
 	Map(...string) (string, error)
-	Mount(string, string, uintptr) error
+	Mount(string, string, uintptr, string) error
 	Unmount(string) error
 	Unmap() error
-	MapAndMount(string, string, uintptr, ...string) error
+	MapAndMount(string, string, uintptr, string, ...string) error
 	UnmountAndUnmap(string) error
 	Remove() error
 	FileSystem() (string, error)
@@ -35,8 +35,15 @@ func device(d Dev) (string, error) {
 		return "", err
 	}
 	for _, m := range mapped {
-		if m.Snapshot == "-" && m.Name == d.Name() && m.Pool == d.Pool().Name() {
-			return m.Device, nil
+		switch v := d.(type) {
+		case *Image:
+			if m.Snapshot == "-" && m.Name == v.Name() && m.Pool == v.Pool().Name() {
+				return m.Device, nil
+			}
+		case *Snapshot:
+			if m.Snapshot == v.Name() && m.Name == v.Image().Name() && m.Pool == v.Pool().Name() {
+				return m.Device, nil
+			}
 		}
 	}
 	return "", nil
@@ -94,24 +101,24 @@ func devCmdArgs(d Dev, args ...string) []string {
 	return d.Pool().cmdArgs(args...)
 }
 
-func devMapAndMount(d Dev, mountPoint, fs string, flags uintptr, mapF func() (string, error)) error {
-	err := d.Mount(mountPoint, fs, flags)
+func devMapAndMount(d Dev, mountPoint, fs string, flags uintptr, data string, mapF func() (string, error)) error {
+	err := d.Mount(mountPoint, fs, flags, data)
 	if errors.Is(err, ErrNotMapped) {
 		blk, err := mapF()
 		if err != nil {
 			return err
 		}
-		return mount(blk, mountPoint, fs, flags)
+		return mount(blk, mountPoint, fs, flags, data)
 	}
 	return err
 }
 
-func devMount(d Dev, mountPoint, fs string, flags uintptr) error {
+func devMount(d Dev, mountPoint, fs string, flags uintptr, data string) error {
 	blk, err := mustDevice(d)
 	if err != nil {
 		return err
 	}
-	return mount(blk, mountPoint, fs, flags)
+	return mount(blk, mountPoint, fs, flags, data)
 }
 
 func devUnmount(d Dev, mountPoint string) error {

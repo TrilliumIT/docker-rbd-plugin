@@ -37,7 +37,8 @@ func main() {
 		}
 		return nil
 	}
-	var omitTimestamp bool
+	var omitTimestamp, onlyMapped bool
+	var mountPointDir, fileSystem string
 	var pruneAge time.Duration
 	app.Commands = []cli.Command{
 		{
@@ -49,16 +50,35 @@ func main() {
 					Usage:       "don't add timestamp after snapshot prefix",
 					Destination: &omitTimestamp,
 				},
+				cli.BoolTFlag{
+					Name:        "only_mapped",
+					Usage:       "only snapshot mapped rbd images",
+					Destination: &onlyMapped,
+				},
 			},
 			Action: func(c *cli.Context) error {
-				return snap(prefix, omitTimestamp, c.Args()...)
+				return snap(prefix, omitTimestamp, onlyMapped, c.Args()...)
 			},
 		},
 		{
 			Name:  "mount",
 			Usage: "mount latest snapshot for rbs",
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:        "mount_dir",
+					Usage:       "directory to create image mountpoints",
+					Value:       "/mnt/rbd",
+					Destination: &mountPointDir,
+				},
+				cli.StringFlag{
+					Name:        "filesystem",
+					Usage:       "mount images as filesystem (empty to auto-detect)",
+					Value:       "",
+					Destination: &fileSystem,
+				},
+			},
 			Action: func(c *cli.Context) error {
-				return mount(prefix, c.Args()...)
+				return mount(prefix, mountPointDir, fileSystem, c.Args()...)
 			},
 		},
 		{
@@ -82,10 +102,6 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-}
-
-func mount(prefix string, pattern ...string) error {
-	return nil
 }
 
 func prune(prefix string, pruneAge time.Duration, pattern ...string) error {

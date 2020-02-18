@@ -44,6 +44,7 @@ func getMounts(blk string) ([]*MountInfo, error) {
 	return getMountInfoForDevFromFile("/proc/self/mountinfo", blk)
 }
 
+// Use empty string for blk to get anything mounted here
 func isMountedAt(blk, mountPoint string) (bool, error) {
 	mounts, err := getMounts(blk)
 	if err != nil {
@@ -65,7 +66,7 @@ func getFs(blk string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-func mount(blk, mountPoint, fs string, flags uintptr) error {
+func mount(blk, mountPoint, fs string, flags uintptr, data string) error {
 	if mounted, err := isMountedAt(blk, mountPoint); err != nil || mounted {
 		return err
 	}
@@ -82,7 +83,7 @@ func mount(blk, mountPoint, fs string, flags uintptr) error {
 		return fmt.Errorf("error creating directory: %v: %w", mountPoint, err)
 	}
 
-	if err := syscall.Mount(blk, mountPoint, fs, flags, ""); err != nil {
+	if err := syscall.Mount(blk, mountPoint, fs, flags, data); err != nil {
 		return fmt.Errorf("error mounting %v to %v as %v: %w", blk, mountPoint, fs, err)
 	}
 
@@ -187,7 +188,7 @@ func getMountInfoForDevFromFile(MountInfoFile, blk string) ([]*MountInfo, error)
 		if err != nil {
 			return mounts, err
 		}
-		if m.Source == blk {
+		if m.Source == blk || blk == "" {
 			mounts = append(mounts, m)
 		} else {
 			otherMounts[m.Id] = m

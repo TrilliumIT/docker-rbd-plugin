@@ -124,3 +124,19 @@ func fsFreeze(mountpoint string, unfreeze bool) error {
 
 	return nil
 }
+
+func FSFreezeBlk(blk string) (func(), error) {
+	mounts, err := getMounts(blk)
+	if err != nil {
+		return nil, fmt.Errorf("error getting mounts for %v: %w", blk, err)
+	}
+	if len(mounts) == 0 {
+		if err = isMountedElsewhere(blk, ""); err != nil {
+			return nil, err
+		}
+	} else {
+		mountPoint := mounts[0].MountPoint
+		return func() { FSUnfreeze(mountPoint) }, FSFreeze(mountPoint)
+	}
+	return func() {}, nil
+}

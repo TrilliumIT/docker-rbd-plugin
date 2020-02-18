@@ -2,7 +2,6 @@ package rbd
 
 import (
 	"errors"
-	"fmt"
 )
 
 type Image struct {
@@ -72,16 +71,16 @@ func (img *Image) DisableFeatures(feature ...string) error {
 	return cmdRun(nil, args...)
 }
 
-func (img *Image) Mount(mountPoint, fs string, flags uintptr) error {
-	return devMount(img, mountPoint, fs, flags)
+func (img *Image) Mount(mountPoint, fs string, flags uintptr, data string) error {
+	return devMount(img, mountPoint, fs, flags, data)
 }
 
-func (img *Image) MapAndMount(mountPoint, fs string, flags uintptr, args ...string) error {
-	return devMapAndMount(img, mountPoint, fs, flags, func() (string, error) { return img.Map(args...) })
+func (img *Image) MapAndMount(mountPoint, fs string, flags uintptr, data string, args ...string) error {
+	return devMapAndMount(img, mountPoint, fs, flags, data, func() (string, error) { return img.Map(args...) })
 }
 
-func (img *Image) MapAndMountExclusive(mountPoint, fs string, flags uintptr, args ...string) error {
-	return devMapAndMount(img, mountPoint, fs, flags, func() (string, error) { return img.MapExclusive(args...) })
+func (img *Image) MapAndMountExclusive(mountPoint, fs string, flags uintptr, data string, args ...string) error {
+	return devMapAndMount(img, mountPoint, fs, flags, data, func() (string, error) { return img.MapExclusive(args...) })
 }
 
 func (img *Image) Unmap() error {
@@ -119,24 +118,17 @@ func (img *Image) CreateSnapshot(name string) (*Snapshot, error) {
 	return img.getSnapshot(name), err
 }
 
-func (img *Image) CreateConsistentSnapshot(name string) (*Snapshot, error) {
-	blk, err := mustDevice(img)
+func (img *Image) CreateConsistentSnapshot(name string, onlyIfMapped bool) (*Snapshot, error) {
+	blk, err := device(img)
 	if err != nil {
 		return nil, err
 	}
-	mounts, err := getMounts(blk)
-	if err != nil {
-		return nil, fmt.Errorf("error getting mounts for %v: %w", blk, err)
-		return nil, err
+	if onlyIfMapped && blk == "" {
+		return nil, ErrNotMapped
 	}
-	if len(mounts) == 0 {
-		if err = isMountedElsewhere(blk, ""); err != nil {
-			return nil, err
-		}
-	} else {
-		mountPoint := mounts[0].MountPoint
-		err := FSFreeze(mountPoint)
-		defer FSUnfreeze(mountPoint)
+	if blk != "" {
+		unfreeze, err := FSFreezeBlk(blk)
+		defer unfreeze()
 		if err != nil {
 			return nil, err
 		}

@@ -14,6 +14,10 @@ type snapshotListEntry struct {
 	Timestamp string `json:"timestamp"`
 }
 
+func (snap *Snapshot) Image() *Image {
+	return snap.image
+}
+
 const XFS_MOUNT_NORECOVERY uintptr = 1 << 10 // see xfs_mount.h
 
 var _ Dev = (*Snapshot)(nil) // compile check that Image satisfies  Dev
@@ -51,13 +55,13 @@ func (snap *Snapshot) Map(args ...string) (string, error) {
 	return devMap(snap, args...)
 }
 
-func (snap *Snapshot) Mount(mountPoint, fs string, flags uintptr) error {
+func (snap *Snapshot) Mount(mountPoint, fs string, flags uintptr, data string) error {
 	flags = flags & syscall.MS_RDONLY
-	return devMount(snap, mountPoint, fs, flags)
+	return devMount(snap, mountPoint, fs, flags, data)
 }
 
-func (snap *Snapshot) MapAndMount(mountPoint, fs string, flags uintptr, args ...string) error {
-	return devMapAndMount(snap, mountPoint, fs, flags, func() (string, error) { return snap.Map(args...) })
+func (snap *Snapshot) MapAndMount(mountPoint, fs string, flags uintptr, data string, args ...string) error {
+	return devMapAndMount(snap, mountPoint, fs, flags, data, func() (string, error) { return snap.Map(args...) })
 }
 
 func (snap *Snapshot) Unmap() error {
