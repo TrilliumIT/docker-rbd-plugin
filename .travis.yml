@@ -14,18 +14,18 @@ install:
 
 script:
   - cd bin
-  - md5sum docker-rbd-plugin > md5.txt
-  - sha256sum docker-rbd-plugin > sha256.txt
-  - sha512sum docker-rbd-plugin > sha512.txt
-  - md5sum rbd-snap > md5.txt
-  - sha256sum rbd-snap > sha256.txt
-  - sha512sum rbd-snap > sha512.txt
+  - md5sum docker-rbd-plugin >> md5.txt
+  - sha256sum docker-rbd-plugin >> sha256.txt
+  - sha512sum docker-rbd-plugin >> sha512.txt
+  - md5sum rbd-snap >> md5.txt
+  - sha256sum rbd-snap >> sha256.txt
+  - sha512sum rbd-snap >> sha512.txt
 
 deploy:
   - provider: releases
     skip_cleanup: true
     api_key:
-      secure: QGliUxC1kPM/dMHRdYrhXb301Q8/uV0IMCqOwTS8+Pborw4BCo8XW4XeyiX7y15X+RIc9CaivKkno5f1OGT9ygeeXQg0zLz/fHlIQBvON54MflsJeCUGfixkR06n+x+fRyf1asKDZUE1+TaMiT4MOXlGnf1zpXbtRF3/T+oKxuHU5R4t2WX079vqJ/Na4qNlFTzcRKqJQ0IXVY4VfKfleJI0TPe+sFQqpcKUIu9DPeqRPe1092f+yjfx+KJqfH7lbzZHkiOtN3V3I1t3sRYwhqqPYA7rUPYs07E46lfQWJdOW0bJtkeUsyB6byjeVVL20VC3FWcOXHG91hEWWp7/I4UQ1ZawZtFK6PBfbSOG8gN8KhIZMGsxYoo12m4d29w6u+3T1g91W8+5eDUtmEs5ZOETjWtqqntm0mUWCNrdVn4mgti5pOx/Z7MLoJPIu3Zin/facNEeY4Cw03U8ngplcZmE/4Zzoq0HfFzV1Z4dwNKpcGm5NOcfLSfj59WC3jpKPaUP7d++BSfbkEcrWSw6Ai6Qp3SIDsL2mEUc2vkccajIDBqTFcfGBX5K7jXVzO31RaOxBXcy8i4sSwbH86Ki67lcD6n52A8J7uP7GwLhTpm6vpZetJqNaK0PPj8KIg/uKxu/t/m9z3GL7DJZiuqqKZzk1PcFx2x/4Rfb4efhv6U=
+      secure: ZQfJvpGGNqIdmr0wwAfBaen+4jsBAqcCaXfRrcvokeAuy5GpwwDLV+jVhEAOZr3CoPSZvGE/QYQgWyH47Gcq/hSzMuEcdxgXI82KXSxNG5mHJoJcM2nKufKkfzDgAg3IILkcovTyOSLEajql0s67CKf5bub4pH9ubpWk5nlMwC7Nol7KNhc7De0sPJajyc6ykJPzwbDwiI7HUEUX6nyKkX9BGkbCZjy2pbAZVS0QYdbUbvAzDT+SiljxLlzUhzZGfBUP5xxTac+/bfsn6CWK2tyaOuw4lmAdYZhZJdc6uJZ3Mf9JAZNkb/8aGjg4PEyN3pj00vM/ZGgnCKb64EcAYqx2sfuSd9+SYMy8JuAXSnLLJLaj2GGIm5zi2OWP+uf8URSjPvTe5OPm6CW96NtXnC4df3fK4qb29t8hKiPh+G+BkRsqn2tH37Qwq8u/icrnrWhL01iDMVVai7poqQIN9nNrJE+9hxMOcB1FQkR3gO5gmCpCHi3hfnx3flYJdbyR8I5Qd4u5MA40xJ4nTw75eCksrneGfFfYLf6Be8VPPNP/m6YPBVN8+k5v7yyo9yDt60bmtMXrS0TI6ooWufOw4vgsAqv/Kt+6/32lcy5Ke8U2ORPP9y9guLgmp0LcPewicrGIXZ7Pe9wlNGnvhqBeJlDqyVhn/fK/kF6AFnER/P8=
     file:
       - docker-rbd-plugin
       - rbd-snap
