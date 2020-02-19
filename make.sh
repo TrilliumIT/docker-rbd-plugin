@@ -5,9 +5,6 @@ check_prerequisites() {
 	[[ "$GOPATH" == "" ]] && \
 		errors=(${errors[@]} "GOPATH env missing")
 	
-	[[ -x "$GOPATH/bin/dep" ]] || \
-		errors=("${errors[@]}" "dep not found in \"$GOPATH/bin/\"")
-
 	if [[ "${#errors[@]}" > 0 ]]; then
 		echo "Errors:"
 		for error in "${errors[@]}"; do
@@ -47,13 +44,7 @@ MAIN_VER=$(grep "\t*version *= " main.go | sed 's/\t*version *= //g' | sed 's/"/
 check_prerequisites || exit 1
 check_versions || exit 1
 
-echo "Installing Dependencies..."
-$GOPATH/bin/dep ensure
-
-echo "Linting..."
-gometalinter --vendor ./...
-
-
 echo "Building..."
 mkdir bin 2>/dev/null || true
 go build -o bin/docker-rbd-plugin .
+go build -o bin/rbd-snap ./tools/rbd-snap

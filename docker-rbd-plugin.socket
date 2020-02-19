@@ -1,0 +1,5 @@
+[Socket]
+ListenStream=/run/docker/plugins/rbd.sock
+
+[Install]
+WantedBy = sockets.target

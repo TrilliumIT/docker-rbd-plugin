@@ -6,39 +6,60 @@ import (
 	"os/signal"
 	"os/user"
 	"syscall"
+	"time"
 
-	log "github.com/Sirupsen/logrus"
-	"github.com/TrilliumIT/docker-rbd-plugin/rbd"
+	"github.com/coreos/go-systemd/activation"
 	"github.com/docker/go-plugins-helpers/volume"
+	log "github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
 )
 
 const (
-	version = "0.1.3"
+	version = "0.2.0"
 )
 
 func main() {
 	fmt.Printf("Starting docker-rbd-plugin version: %v\n", version)
-
-	var flagPool = cli.StringFlag{
-		Name:  "pool",
-		Value: "docker",
-		Usage: "Name of the pool in which to create our rbd images. Default \"docker\". Pool MUST already exist in ceph cluster.",
-	}
-
-	var flagDefaultSize = cli.StringFlag{
-		Name:  "default-size",
-		Value: "20G",
-		Usage: "Default size when creating an rbd image.",
-	}
 
 	app := cli.NewApp()
 	app.Name = "docker-rbd-plugin"
 	app.Usage = "Docker RBD Plugin"
 	app.Version = version
 	app.Flags = []cli.Flag{
-		flagPool,
-		flagDefaultSize,
+		cli.StringFlag{
+			Name:  "pool",
+			Value: "docker",
+			Usage: "Name of the pool in which to create our rbd images. Default \"docker\". Pool MUST already exist in ceph cluster.",
+		},
+
+		cli.StringFlag{
+			Name:  "default-size",
+			Value: "20G",
+			Usage: "Default size when creating an rbd image.",
+		},
+
+		cli.StringFlag{
+			Name:   "default-filesystem",
+			Value:  "xfs",
+			Usage:  "Default filesystem when creating an rbd image.",
+			EnvVar: "RBD_DEFAULT_FS",
+		},
+
+		cli.StringFlag{
+			Name:   "mountpoint",
+			Value:  "/var/lib/docker-volumes/rbd",
+			Usage:  "Mountpoint for rbd images.",
+			EnvVar: "RBD_VOLUME_DIR",
+		},
+		cli.DurationFlag{
+			Name:  "reap",
+			Value: time.Second * 30,
+			// this will scan every 5m images that are mounted in mountpoint, but nowhere else,
+			// or images that are not mounted anywhere, and unmap them, if the modification time of
+			// the block device is older than the duration here (to prevent unmapping something
+			// an admistrator just mapped manually
+			Usage: "reap mapped images (0 to disable)",
+		},
 	}
 	app.Action = Run
 
@@ -49,32 +70,19 @@ func main() {
 }
 
 // Run runs the driver
-func Run(ctx *cli.Context) {
+func Run(ctx *cli.Context) error {
 	u, err := user.Current()
 	if err != nil {
-		fmt.Println("Error trying to get the current user.")
-		os.Exit(1)
+		return fmt.Errorf("error getting the current user")
 	}
 
 	if u.Uid != "0" {
-		fmt.Println("Docker RBD Plugin requires root privileges.")
-		os.Exit(1)
+		return fmt.Errorf("user is not root")
 	}
 
-	b, err := rbddriver.PoolExists(ctx.String("pool"))
+	d, err := NewRbdDriver(ctx.String("pool"), ctx.String("default-size"), ctx.String("default-filesystem"), ctx.String("mountpoint"))
 	if err != nil {
-		fmt.Println(err.Error())
-		os.Exit(1)
-	}
-
-	if !b {
-		fmt.Printf("The requested ceph pool %v for docker volumes does not exist in the ceph cluster.\n", ctx.String("pool"))
-	}
-
-	d, err := rbddriver.NewRbdDriver(ctx.String("pool"), ctx.String("default-size"))
-	if err != nil {
-		fmt.Println(err.Error())
-		os.Exit(1)
+		return err
 	}
 
 	c := make(chan os.Signal)
@@ -83,14 +91,31 @@ func Run(ctx *cli.Context) {
 	signal.Notify(c, syscall.SIGTERM)
 	go func() {
 		<-c
-		d.UnmountWait()
 		os.Exit(0)
 	}()
 
-	log.Debug("Launching volume handler.")
 	h := volume.NewHandler(d)
-	err = h.ServeUnix("rbd", 0)
-	if err != nil {
-		log.WithError(err).Error("error while stopping driver")
+	listeners, _ := activation.Listeners() // wtf coreos, this funciton never returns errors
+	if len(listeners) == 0 {
+		log.Debug("launching volume handler.")
+		return h.ServeUnix("rbd", 0)
 	}
+
+	if len(listeners) > 1 {
+		log.Warn("driver does not support multiple sockets")
+	}
+
+	reapDur := ctx.Duration("reap")
+	if reapDur != 0 {
+		ticker := time.NewTicker(reapDur)
+		go func() {
+			for t := range ticker.C {
+				d.reap(t.Add(-reapDur))
+			}
+		}()
+	}
+
+	l := listeners[0]
+	log.WithField("listener", l.Addr().String()).Debug("launching volume handler")
+	return h.Serve(l)
 }
