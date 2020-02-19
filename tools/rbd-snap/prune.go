@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/TrilliumIT/docker-rbd-plugin/rbd"
@@ -21,11 +22,14 @@ func prune(prefix string, pruneAge time.Duration, pattern ...string) error {
 			return err
 		}
 		created := time.Time(snapInfo.CreateTimestamp)
-		log = log.WithField("created", created)
 		if created.IsZero() {
-			log.Error("error parsing create time")
-			return fmt.Errorf("error parsing create time for %v", snap.FullName())
+			log.Warn("error parsing create time, attempting to get time from snap name")
+			created, err = time.Parse(time.RFC3339, strings.TrimPrefix(snap.Name(), prefix+"_"))
+			if err != nil {
+				return fmt.Errorf("error parsing create time for %v", snap.FullName())
+			}
 		}
+		log = log.WithField("created", created)
 		if pruneBefore.Before(created) {
 			log.Debug("skipping newer snapshot")
 			return nil
