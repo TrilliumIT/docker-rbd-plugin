@@ -65,13 +65,14 @@ func (img *Image) MapExclusive(args ...string) (string, error) {
 	args = append([]string{"--exclusive"}, args...)
 	blk, err := devMap(img, args...)
 	if errors.Is(err, ErrExclusiveLockNotEnabled) {
-		err = img.EnableFeatures("exclusive-locks")
+		err = img.EnableFeatures("exclusive-lock")
 		if err != nil {
-			return "", err
+			return "", wrapErr(err, "error enabling exclusive-lock on %v", img.FullName())
 		}
-		return devMap(img, args...)
+		blk, err = devMap(img, args...)
+		return blk, wrapErr(err, "error mapping %v after enabling exclusive-lock", img.FullName())
 	}
-	return blk, err
+	return blk, wrapErr(err, "error exlusive mapping %v", img.FullName())
 }
 
 // ErrFeatureAlreadyEnabled is returned when enabling a feature that is already enabled

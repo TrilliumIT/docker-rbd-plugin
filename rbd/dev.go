@@ -113,11 +113,11 @@ func devMapAndMount(d Dev, mountPoint, fs string, flags uintptr, data string, ma
 	if errors.Is(err, ErrNotMapped) {
 		blk, err := mapF()
 		if err != nil {
-			return err
+			return wrapErr(err, "error calling map function on %v", d.FullName())
 		}
-		return mount(blk, mountPoint, fs, flags, data)
+		return wrapErr(mount(blk, mountPoint, fs, flags, data), "error mounting %v to %v after mapping to %v", d.FullName(), mountPoint, blk)
 	}
-	return err
+	return wrapErr(err, "error mounting %v to %v", d.FullName(), mountPoint)
 }
 
 func devMount(d Dev, mountPoint, fs string, flags uintptr, data string) error {

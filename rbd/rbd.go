@@ -14,6 +14,13 @@ import (
 var rbdBin string
 var fsFreezePath string
 
+func wrapErr(err error, errStr string, args ...interface{}) error {
+	if err == nil {
+		return err
+	}
+	return fmt.Errorf(errStr+": %w", append(args, err)...)
+}
+
 func init() {
 	var err error
 	rbdBin, err = exec.LookPath("rbd")
