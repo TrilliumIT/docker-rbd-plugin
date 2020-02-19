@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -12,8 +13,9 @@ import (
 )
 
 type errCollector struct {
-	mu   *sync.Mutex
-	errs []error
+	mu         *sync.Mutex
+	errs       []error
+	ignoreErrs []error
 }
 
 func newErrCollector() *errCollector {
@@ -26,12 +28,17 @@ func newErrCollector() *errCollector {
 func (ec *errCollector) add(err error) {
 	if err != nil {
 		ec.mu.Lock()
+		defer ec.mu.Unlock()
+		for _, ie := range ec.ignoreErrs {
+			if errors.Is(err, ie) {
+				return
+			}
+		}
 		ec.errs = append(ec.errs, err)
-		ec.mu.Unlock()
 	}
 }
 
-func (ec *errCollector) err() error {
+func (ec *errCollector) Error() string {
 	ec.mu.Lock()
 	defer ec.mu.Unlock()
 	var errStr string
@@ -40,10 +47,34 @@ func (ec *errCollector) err() error {
 			errStr = errStr + "\n" + err.Error()
 		}
 	}
-	if errStr != "" {
-		return fmt.Errorf(errStr)
+	return errStr
+}
+
+func (ec *errCollector) err() error {
+	ec.mu.Lock()
+	if len(ec.errs) == 0 {
+		ec.mu.Unlock()
+		return nil
 	}
-	return nil
+	if len(ec.errs) == 1 {
+		ec.mu.Unlock()
+		return ec.errs[0]
+	}
+	ec.mu.Unlock()
+	return ec
+}
+
+func (ec *errCollector) ignore(err error) {
+	ec.mu.Lock()
+	defer ec.mu.Unlock()
+	ec.ignoreErrs = append(ec.ignoreErrs, err)
+	filteredErrs := ec.errs[:0]
+	for _, e := range ec.errs {
+		if !errors.Is(e, err) {
+			filteredErrs = append(filteredErrs, e)
+		}
+	}
+	ec.errs = filteredErrs
 }
 
 func loopSnaps(f func(*rbd.Snapshot, *log.Entry) error, log *log.Entry, patterns ...string) error {

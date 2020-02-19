@@ -98,5 +98,13 @@ func mount(prefix, mountPointDir, fileSystem string, patterns ...string) error {
 		return nil
 	}
 
-	return loopImgs(mountF, log.NewEntry(log.StandardLogger()), patterns...)
+	err := loopImgs(mountF, log.NewEntry(log.StandardLogger()), patterns...)
+	if errCol, ok := err.(*errCollector); ok {
+		errCol.ignore(ErrNoSnapshots)
+		err = errCol.err()
+	}
+	if errors.Is(err, ErrNoSnapshots) {
+		err = nil
+	}
+	return err
 }
