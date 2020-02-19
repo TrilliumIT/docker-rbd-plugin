@@ -40,14 +40,14 @@ func (ec *errCollector) add(err error) {
 
 func (ec *errCollector) Error() string {
 	ec.mu.Lock()
+	var errStrs []string
 	defer ec.mu.Unlock()
-	var errStr string
 	for _, err := range ec.errs {
 		if err != nil {
-			errStr = errStr + "\n" + err.Error()
+			errStrs = append(errStrs, err.Error())
 		}
 	}
-	return errStr
+	return strings.Join(errStrs, "; ")
 }
 
 func (ec *errCollector) err() error {

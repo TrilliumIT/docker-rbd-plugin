@@ -37,7 +37,7 @@ func main() {
 		}
 		return nil
 	}
-	var omitTimestamp, onlyMapped bool
+	var onlyMapped bool
 	var mountPointDir, fileSystem string
 	var pruneAge time.Duration
 	app.Commands = []cli.Command{
@@ -46,18 +46,13 @@ func main() {
 			Usage: "take a snapshot of all mounted rbds",
 			Flags: []cli.Flag{
 				cli.BoolTFlag{
-					Name:        "omit_timestamp",
-					Usage:       "don't add timestamp after snapshot prefix",
-					Destination: &omitTimestamp,
-				},
-				cli.BoolTFlag{
 					Name:        "only_mapped",
 					Usage:       "only snapshot mapped rbd images",
 					Destination: &onlyMapped,
 				},
 			},
 			Action: func(c *cli.Context) error {
-				return snap(prefix, omitTimestamp, onlyMapped, c.Args()...)
+				return snap(prefix, onlyMapped, c.Args()...)
 			},
 		},
 		{

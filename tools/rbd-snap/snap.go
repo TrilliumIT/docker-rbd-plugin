@@ -9,11 +9,8 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-func snap(prefix string, includeTS, onlyMapped bool, patterns ...string) error {
-	snapName := prefix
-	if includeTS {
-		snapName = snapName + "_" + time.Now().UTC().Format(time.RFC3339)
-	}
+func snap(prefix string, onlyMapped bool, patterns ...string) error {
+	snapName := prefix + "_" + time.Now().UTC().Format(time.RFC3339)
 	log := log.WithField("snapshot", snapName)
 
 	snapF := func(img *rbd.Image, log *logrus.Entry) error {

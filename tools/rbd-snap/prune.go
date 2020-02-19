@@ -16,18 +16,9 @@ func prune(prefix string, pruneAge time.Duration, pattern ...string) error {
 	log.Info("pruning snapshots")
 
 	pruneF := func(snap *rbd.Snapshot, log *logrus.Entry) error {
-		snapInfo, err := snap.Info()
+		created, err := time.Parse(time.RFC3339, strings.TrimPrefix(snap.Name(), prefix+"_"))
 		if err != nil {
-			log.WithError(err).Error("error getting info")
-			return err
-		}
-		created := time.Time(snapInfo.CreateTimestamp)
-		if created.IsZero() {
-			log.Warn("error parsing create time, attempting to get time from snap name")
-			created, err = time.Parse(time.RFC3339, strings.TrimPrefix(snap.Name(), prefix+"_"))
-			if err != nil {
-				return fmt.Errorf("error parsing create time for %v", snap.FullName())
-			}
+			return fmt.Errorf("error parsing create time for %v", snap.FullName())
 		}
 		log = log.WithField("created", created)
 		if pruneBefore.Before(created) {
