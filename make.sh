@@ -47,3 +47,4 @@ check_versions || exit 1
 echo "Building..."
 mkdir bin 2>/dev/null || true
 go build -o bin/docker-rbd-plugin .
+go build -o bin/rbd-snap ./tools/rbd-snap

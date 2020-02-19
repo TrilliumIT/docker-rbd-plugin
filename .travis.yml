@@ -8,6 +8,7 @@ env:
     - GO15VENDOREXPERIMENT=1
     - GOOS=linux
 
+
 install:
   - ./make.sh
 
@@ -16,6 +17,9 @@ script:
   - md5sum docker-rbd-plugin > md5.txt
   - sha256sum docker-rbd-plugin > sha256.txt
   - sha512sum docker-rbd-plugin > sha512.txt
+  - md5sum rbd-snap > md5.txt
+  - sha256sum rbd-snap > sha256.txt
+  - sha512sum rbd-snap > sha512.txt
 
 deploy:
   - provider: releases
@@ -24,6 +28,7 @@ deploy:
       secure: QGliUxC1kPM/dMHRdYrhXb301Q8/uV0IMCqOwTS8+Pborw4BCo8XW4XeyiX7y15X+RIc9CaivKkno5f1OGT9ygeeXQg0zLz/fHlIQBvON54MflsJeCUGfixkR06n+x+fRyf1asKDZUE1+TaMiT4MOXlGnf1zpXbtRF3/T+oKxuHU5R4t2WX079vqJ/Na4qNlFTzcRKqJQ0IXVY4VfKfleJI0TPe+sFQqpcKUIu9DPeqRPe1092f+yjfx+KJqfH7lbzZHkiOtN3V3I1t3sRYwhqqPYA7rUPYs07E46lfQWJdOW0bJtkeUsyB6byjeVVL20VC3FWcOXHG91hEWWp7/I4UQ1ZawZtFK6PBfbSOG8gN8KhIZMGsxYoo12m4d29w6u+3T1g91W8+5eDUtmEs5ZOETjWtqqntm0mUWCNrdVn4mgti5pOx/Z7MLoJPIu3Zin/facNEeY4Cw03U8ngplcZmE/4Zzoq0HfFzV1Z4dwNKpcGm5NOcfLSfj59WC3jpKPaUP7d++BSfbkEcrWSw6Ai6Qp3SIDsL2mEUc2vkccajIDBqTFcfGBX5K7jXVzO31RaOxBXcy8i4sSwbH86Ki67lcD6n52A8J7uP7GwLhTpm6vpZetJqNaK0PPj8KIg/uKxu/t/m9z3GL7DJZiuqqKZzk1PcFx2x/4Rfb4efhv6U=
     file:
       - docker-rbd-plugin
+      - rbd-snap
       - md5.txt
       - sha256.txt
       - sha512.txt
