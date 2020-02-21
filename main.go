@@ -94,6 +94,16 @@ func Run(ctx *cli.Context) error {
 		os.Exit(0)
 	}()
 
+	reapDur := ctx.Duration("reap")
+	if reapDur != 0 {
+		ticker := time.NewTicker(reapDur)
+		go func() {
+			for t := range ticker.C {
+				d.reap(t.Add(-reapDur))
+			}
+		}()
+	}
+
 	h := volume.NewHandler(d)
 	listeners, _ := activation.Listeners() // wtf coreos, this funciton never returns errors
 	if len(listeners) == 0 {
@@ -103,16 +113,6 @@ func Run(ctx *cli.Context) error {
 
 	if len(listeners) > 1 {
 		log.Warn("driver does not support multiple sockets")
-	}
-
-	reapDur := ctx.Duration("reap")
-	if reapDur != 0 {
-		ticker := time.NewTicker(reapDur)
-		go func() {
-			for t := range ticker.C {
-				d.reap(t.Add(-reapDur))
-			}
-		}()
 	}
 
 	l := listeners[0]
