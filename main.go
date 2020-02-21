@@ -1,7 +1,10 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"os/user"
@@ -15,7 +18,8 @@ import (
 )
 
 const (
-	version = "0.2.0"
+	version         = "0.2.1"
+	shutdownTimeout = 10 * time.Second
 )
 
 func main() {
@@ -65,7 +69,7 @@ func main() {
 
 	err := app.Run(os.Args)
 	if err != nil {
-		panic(err)
+		log.WithError(err).Fatal()
 	}
 }
 
@@ -85,15 +89,6 @@ func Run(ctx *cli.Context) error {
 		return err
 	}
 
-	c := make(chan os.Signal)
-	defer close(c)
-	signal.Notify(c, os.Interrupt)
-	signal.Notify(c, syscall.SIGTERM)
-	go func() {
-		<-c
-		os.Exit(0)
-	}()
-
 	reapDur := ctx.Duration("reap")
 	if reapDur != 0 {
 		ticker := time.NewTicker(reapDur)
@@ -105,17 +100,43 @@ func Run(ctx *cli.Context) error {
 	}
 
 	h := volume.NewHandler(d)
+	errCh := make(chan error)
 	listeners, _ := activation.Listeners() // wtf coreos, this funciton never returns errors
-	if len(listeners) == 0 {
-		log.Debug("launching volume handler.")
-		return h.ServeUnix("rbd", 0)
-	}
-
 	if len(listeners) > 1 {
 		log.Warn("driver does not support multiple sockets")
 	}
+	if len(listeners) == 0 {
+		log.Debug("launching volume handler on default socket")
+		go func() { errCh <- h.ServeUnix("rbd", 0) }()
+	} else {
+		l := listeners[0]
+		log.WithField("listener", l.Addr().String()).Debug("launching volume handler")
+		go func() { errCh <- h.Serve(l) }()
+	}
 
-	l := listeners[0]
-	log.WithField("listener", l.Addr().String()).Debug("launching volume handler")
-	return h.Serve(l)
+	c := make(chan os.Signal)
+	defer close(c)
+	signal.Notify(c, os.Interrupt)
+	signal.Notify(c, syscall.SIGTERM)
+
+	select {
+	case err = <-errCh:
+		log.WithError(err).Error("error running handler")
+		close(errCh)
+	case <-c:
+	}
+
+	toCtx, toCtxCancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer toCtxCancel()
+	if sErr := h.Shutdown(toCtx); sErr != nil {
+		err = sErr
+		log.WithError(err).Error("error shutting down handler")
+	}
+
+	if hErr := <-errCh; hErr != nil && !errors.Is(hErr, http.ErrServerClosed) {
+		err = hErr
+		log.WithError(err).Error("error in handler after shutdown")
+	}
+
+	return err
 }

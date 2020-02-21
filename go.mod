@@ -22,4 +22,7 @@ require (
 	gopkg.in/yaml.v2 v2.2.8 // indirect
 )
 
-replace github.com/coreos/go-systemd => github.com/coreos/go-systemd/v22 v22.0.0
+replace (
+	github.com/coreos/go-systemd => github.com/coreos/go-systemd/v22 v22.0.0
+	github.com/docker/go-plugins-helpers => github.com/clinta/go-plugins-helpers v0.0.0-20200221140445-4667bb9f0ed5 // for shutdown
+)
