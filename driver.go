@@ -92,7 +92,7 @@ func (rd *RbdDriver) List() (*volume.ListResponse, error) {
 		log.WithError(err).Error("error in driver list")
 		return nil, fmt.Errorf("error in driver list for %v: %w", rd.pool.Name(), err)
 	}
-	vols := make([]*volume.Volume, len(imgs), len(imgs))
+	vols := make([]*volume.Volume, 0, len(imgs))
 	for _, img := range imgs {
 		vols = append(vols, &volume.Volume{Name: img.Name()})
 	}
