@@ -24,7 +24,6 @@ type RbdDriver struct {
 
 //NewRbdDriver returns a new RbdDriver
 func NewRbdDriver(pool, defaultSize, defaultFileSystem, mountpoint string) (*RbdDriver, error) {
-	log.SetLevel(log.DebugLevel)
 	log.Debug("Creating new RbdDriver.")
 
 	return &RbdDriver{pool: rbd.GetPool(pool), defaultSize: defaultSize, defaultFileSystem: defaultFileSystem, mountpoint: mountpoint}, nil

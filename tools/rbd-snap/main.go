@@ -13,6 +13,8 @@ const (
 )
 
 func main() {
+	verbose := false
+
 	app := cli.NewApp()
 	app.Name = "rbd-snap"
 	app.Version = version
@@ -27,12 +29,13 @@ func main() {
 			Destination: &prefix,
 		},
 		cli.BoolFlag{
-			Name:  "verbose",
-			Usage: "verbose output",
+			Name:        "verbose",
+			Usage:       "verbose output",
+			Destination: &verbose,
 		},
 	}
 	app.Before = func(c *cli.Context) error {
-		if c.Bool("verbose") {
+		if verbose {
 			log.SetLevel(log.DebugLevel)
 		}
 		return nil

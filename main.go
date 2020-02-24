@@ -18,13 +18,14 @@ import (
 )
 
 const (
-	version         = "0.2.2"
+	version         = "0.2.3"
 	shutdownTimeout = 10 * time.Second
 )
 
 func main() {
 	fmt.Printf("Starting docker-rbd-plugin version: %v\n", version)
 
+	verbose := false
 	app := cli.NewApp()
 	app.Name = "docker-rbd-plugin"
 	app.Usage = "Docker RBD Plugin"
@@ -48,7 +49,6 @@ func main() {
 			Usage:  "Default filesystem when creating an rbd image.",
 			EnvVar: "RBD_DEFAULT_FS",
 		},
-
 		cli.StringFlag{
 			Name:   "mountpoint",
 			Value:  "/var/lib/docker-volumes/rbd",
@@ -64,9 +64,19 @@ func main() {
 			// an admistrator just mapped manually
 			Usage: "reap mapped images (0 to disable)",
 		},
+		cli.BoolFlag{
+			Name:        "verbose",
+			Usage:       "verbose output",
+			Destination: &verbose,
+		},
 	}
 	app.Action = Run
-
+	app.Before = func(c *cli.Context) error {
+		if verbose {
+			log.SetLevel(log.DebugLevel)
+		}
+		return nil
+	}
 	err := app.Run(os.Args)
 	if err != nil {
 		log.WithError(err).Fatal()
